@@ -42,7 +42,6 @@ def plot_traj(trajectory, dof):
         axs[2].plot(qdd[:, i], label=str(i))
     plt.legend()
     plt.savefig("test.png")
-    # plt.show()
 
 
 def demo_full_config_mpc():
@@ -93,23 +92,16 @@ def demo_full_config_mpc():
     current_state = start_state  # .clone()
     while not converged:
         st_time = time.time()
-        # current_state.position += 0.1
         print(current_state.position)
         result = mpc.step(current_state, 1)
 
         print(mpc.get_visual_rollouts().shape)
-        # exit()
         torch.cuda.synchronize()
         if tstep > 5:
             mpc_time.append(time.time() - st_time)
-        # goal_buffer.current_state.position[:] = result.action.position
-        # result.action.position += 0.1
         current_state.copy_(result.action)
-        # goal_buffer.current_state.velocity[:] = result.action.vel
         traj_list.append(result.action.get_state_tensor())
         tstep += 1
-        # if tstep % 10 == 0:
-        #    print(result.metrics.pose_error.item(), result.solve_time, mpc_time[-1])
         if result.metrics.pose_error.item() < 0.01:
             converged = True
         if tstep > 1000:

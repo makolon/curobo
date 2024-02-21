@@ -100,7 +100,6 @@ def save_curobo_robot_world_to_usd(robot_file="franka.yml"):
 
 
 def save_curobo_robot_to_usd(robot_file="franka.yml"):
-    # print(robot_file)
     tensor_args = TensorDeviceType()
     robot_cfg_y = load_yaml(join_path(get_robot_configs_path(), robot_file))["robot_cfg"]
     robot_cfg_y["kinematics"]["use_usd_kinematics"] = True
@@ -109,50 +108,36 @@ def save_curobo_robot_to_usd(robot_file="franka.yml"):
         len(robot_cfg_y["kinematics"]["cspace"]["retract_config"]),
         len(robot_cfg_y["kinematics"]["cspace"]["joint_names"]),
     )
-    # print(robot_cfg_y)
     robot_cfg = RobotConfig.from_dict(robot_cfg_y, tensor_args)
     start = JointState.from_position(robot_cfg.cspace.retract_config)
     retract_cfg = robot_cfg.cspace.retract_config.clone()
     retract_cfg[0] = 0.5
 
-    # print(retract_cfg)
     kin_model = CudaRobotModel(robot_cfg.kinematics)
     position = retract_cfg
     q_traj = JointState.from_position(position.unsqueeze(0))
     q_traj.joint_names = kin_model.joint_names
-    # print(q_traj.joint_names)
     usd_helper = UsdHelper()
-    # usd_helper.create_stage(
-    #    "test.usd", timesteps=q_traj.position.shape[0] + 1, dt=dt, interpolation_steps=10
-    # )
     world_file = "collision_table.yml"
     world_model = WorldConfig.from_dict(
         load_yaml(join_path(get_world_configs_path(), world_file))
     ).get_obb_world()
 
-    # print(q_traj.position.shape)
-    # usd_helper.load_robot_usd(robot_cfg.kinematics.usd_path, js)
     usd_helper.write_trajectory_animation_with_robot_usd(
         {"robot_cfg": robot_cfg_y},
         world_model,
         start,
         q_traj,
         save_path="test.usd",
-        # robot_asset_prim_path="/robot"
     )
-
-    # usd_helper.save()
-    # usd_helper.write_stage_to_file("test.usda")
 
 
 def read_world_from_usd(file_path: str):
     usd_helper = UsdHelper()
     usd_helper.load_stage_from_file(file_path)
-    # world_model = usd_helper.get_obstacles_from_stage(reference_prim_path="/Root/world_obstacles")
     world_model = usd_helper.get_obstacles_from_stage(
         only_paths=["/world/obstacles"], reference_prim_path="/world"
     )
-    # print(world_model)
     for x in world_model.cuboid:
         print(x.name + ":")
         print("  pose: ", x.pose)
@@ -184,14 +169,10 @@ def save_log_motion_gen(robot_file: str = "franka.yml"):
         collision_cache=c_cache,
         store_ik_debug=enable_debug,
         store_trajopt_debug=enable_debug,
-        # num_ik_seeds=2,
-        # num_trajopt_seeds=1,
-        # ik_opt_iters=20,
-        # ik_particle_opt=False,
     )
     mg = MotionGen(motion_gen_config)
-    # mg.warmup(enable_graph=True, warmup_js_trajopt=False)
     motion_gen = mg
+
     # generate a plan:
     retract_cfg = motion_gen.get_retract_config()
     state = motion_gen.rollout_fn.compute_kinematics(
@@ -201,21 +182,12 @@ def save_log_motion_gen(robot_file: str = "franka.yml"):
         motion_gen.kinematics.kinematics_config.store_link_map.to(dtype=torch.long)
     ]
 
-    # exit()
     link_poses = state.link_pose
-    # print(link_poses)
-    # del link_poses["tool0"]
-    # del link_poses["tool1"]
-    # del link_poses["tool2"]
-
-    # del link_poses["tool3"]
-    # print(link_poses)
 
     retract_pose = Pose(state.ee_pos_seq.squeeze(), quaternion=state.ee_quat_seq.squeeze())
     start_state = JointState.from_position(retract_cfg.view(1, -1).clone() + 0.5)
 
     # get link poses if they exist:
-
     result = motion_gen.plan_single(
         start_state,
         retract_pose,
@@ -239,7 +211,5 @@ def save_log_motion_gen(robot_file: str = "franka.yml"):
 
 
 if __name__ == "__main__":
-    # save_curobo_world_to_usd()
     setup_curobo_logger("error")
     save_log_motion_gen("franka.yml")
-    # save_curobo_robot_world_to_usd("franka.yml")
