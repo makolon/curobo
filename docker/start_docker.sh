@@ -60,6 +60,7 @@ elif [[ "$input_arg" == *isaac_sim* ]] ; then
         --privileged \
         -e "PRIVACY_CONSENT=Y" \
         -v $HOME/.Xauthority:/root/.Xauthority \
+        -v $HOME/curobo:/root/curobo \
         -e DISPLAY \
         -v ~/docker/isaac-sim/cache/kit:/isaac-sim/kit/cache:rw \
         -v ~/docker/isaac-sim/cache/ov:/root/.cache/ov:rw \

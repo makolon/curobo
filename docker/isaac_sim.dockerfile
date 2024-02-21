@@ -20,7 +20,6 @@ FROM nvcr.io/nvidia/cudagl:${CUDA_VERSION}-devel-${BASE_DIST}
 LABEL maintainer "User Name"
 
 ARG VULKAN_SDK_VERSION=1.3.224.1
-ARG CUROBO_DIR=/root/curobo
 
 # Deal with getting tons of debconf messages
 # See: https://github.com/phusion/baseimage-docker/issues/58
@@ -126,7 +125,7 @@ ENV TORCH_CUDA_ARCH_LIST="7.0+PTX"
 
 # Create an alias for omniverse python
 ENV omni_python='/isaac-sim/python.sh'
-RUN echo "alias omni_python='/isaac-sim/python.sh'" >> /.bashrc
+RUN echo "alias omni_python='/isaac-sim/python.sh'" >> ~/.bashrc
 
 # Add cache date to avoid using cached layers older than this
 ARG CACHE_DATE=2023-12-15 

@@ -56,5 +56,5 @@ fi
 
 # build docker file:
 echo "${dockerfile}"
-docker build --build-arg ISAAC_SIM_VERSION=${isaac_sim_version} --build-arg CUROBO_DIR=${HOME}/curobo \
+docker build --build-arg ISAAC_SIM_VERSION=${isaac_sim_version} \
     -t curobo_docker:${image_tag} -f docker/${dockerfile} .
