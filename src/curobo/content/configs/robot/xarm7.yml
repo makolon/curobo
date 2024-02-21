@@ -39,7 +39,7 @@ robot_cfg:
         "link7",
         "xarm_gripper_base_link",
         "left_outer_knuckle",
-        "left_figer",
+        "left_finger",
         "left_inner_knuckle",
         "right_outer_knuckle",
         "right_finger",
@@ -95,7 +95,7 @@ robot_cfg:
         "link7",
         "xarm_gripper_base_link",
         "left_outer_knuckle",
-        "left_figer",
+        "left_finger",
         "left_inner_knuckle",
         "right_outer_knuckle",
         "right_finger",
@@ -104,7 +104,7 @@ robot_cfg:
     external_asset_path: null # Use this to add path for externally located assets/robot folder.
 
     cspace:
-      joint_names: ['joint1', 'joint2', 'joint3', 'joint4', 'joint5', 'joint6', 'join7',
+      joint_names: ['joint1', 'joint2', 'joint3', 'joint4', 'joint5', 'joint6', 'joint7',
         'left_drive_joint', 'right_drive_oint']
       retract_config: [0.0, -1.3, 0.0, -2.5, 0.0, 1.0, 0., 0.04, 0.04] # TODO: fix this
       null_space_weight: [1,1,1,1,1,1,1,1,1]

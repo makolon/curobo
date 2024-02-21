@@ -27,35 +27,35 @@ RUN echo 'debconf debconf/frontend select Noninteractive' | debconf-set-selectio
 
 # Set timezone info
 RUN apt-get update && apt-get install -y \
-  tzdata \
-  software-properties-common \
-  && rm -rf /var/lib/apt/lists/* \
-  && ln -fs /usr/share/zoneinfo/America/Los_Angeles /etc/localtime \
-  && echo "America/Los_Angeles" > /etc/timezone \
-  && dpkg-reconfigure -f noninteractive tzdata \
-  && add-apt-repository -y ppa:git-core/ppa \
-  && apt-get update && apt-get install -y \
-  curl \
-  lsb-core \
-  wget \
-  build-essential \
-  cmake \
-  git \
-  git-lfs \
-  iputils-ping \
-  make \
-  openssh-server \
-  openssh-client \
-  libeigen3-dev \
-  libssl-dev \
-  python3-pip \
-  python3-ipdb \
-  python3-tk \
-  python3-wstool \
-  sudo git bash unattended-upgrades \
-  apt-utils \
-  terminator \
-  && rm -rf /var/lib/apt/lists/*
+    tzdata \
+    software-properties-common \
+    && rm -rf /var/lib/apt/lists/* \
+    && ln -fs /usr/share/zoneinfo/America/Los_Angeles /etc/localtime \
+    && echo "America/Los_Angeles" > /etc/timezone \
+    && dpkg-reconfigure -f noninteractive tzdata \
+    && add-apt-repository -y ppa:git-core/ppa \
+    && apt-get update && apt-get install -y \
+    curl \
+    lsb-core \
+    wget \
+    build-essential \
+    cmake \
+    git \
+    git-lfs \
+    iputils-ping \
+    make \
+    openssh-server \
+    openssh-client \
+    libeigen3-dev \
+    libssl-dev \
+    python3-pip \
+    python3-ipdb \
+    python3-tk \
+    python3-wstool \
+    sudo git bash unattended-upgrades \
+    apt-utils \
+    terminator \
+    && rm -rf /var/lib/apt/lists/*
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libatomic1 \
@@ -131,8 +131,11 @@ RUN echo "alias omni_python='/isaac-sim/python.sh'" >> ~/.bashrc
 ARG CACHE_DATE=2023-12-15 
 RUN $omni_python -m pip install "robometrics[evaluator] @ git+https://github.com/fishbotics/robometrics.git"
 
+RUN mkdir /pkgs
+
 # Install curobo
-RUN mkdir -p /pkgs/curobo
+RUN cd /pkgs && \
+    mkdir curobo
 COPY ../ /pkgs/curobo/
 RUN $omni_python -m pip install ninja wheel tomli
 RUN cd /pkgs/curobo && $omni_python -m pip install .[dev] --no-build-isolation
