@@ -15,7 +15,6 @@
 # If you want to build a isaac sim docker, run this script with `bash build_dev_docker.sh isaac`
 
 # Check architecture to build:
-
 image_tag="x86"
 isaac_sim_version=""
 input_arg="$1"
@@ -56,18 +55,6 @@ else
 fi
 
 # build docker file:
-# Make sure you enable nvidia runtime by:
-# Edit/create the /etc/docker/daemon.json with content:
-# {
-#    "runtimes": {
-#        "nvidia": {
-#            "path": "/usr/bin/nvidia-container-runtime",
-#            "runtimeArgs": []
-#         } 
-#    },
-#    "default-runtime": "nvidia" # ADD this line (the above lines will already exist in your json file)
-# }
-# 
 echo "${dockerfile}"
-
-docker build --build-arg ISAAC_SIM_VERSION=${isaac_sim_version} -t curobo_docker:${image_tag} -f ${dockerfile} . 
+docker build --build-arg ISAAC_SIM_VERSION=${isaac_sim_version} --build-arg CUROBO_DIR=${HOME}/curobo \
+    -t curobo_docker:${image_tag} -f docker/${dockerfile} .
