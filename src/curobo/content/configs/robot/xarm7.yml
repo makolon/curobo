@@ -12,14 +12,14 @@
 robot_cfg:
   kinematics:
     use_usd_kinematics: False
-    usd_path: "robot/xarm_description/xarm7.usd"
+    usd_path: "robot/xarm_description/usd/xarm7.usd"
     usd_robot_root: "/xarm7"
     isaac_usd_path: ""
     usd_flip_joints: {}
     usd_flip_joint_limits: []
 
-    urdf_path: ""
-    asset_root_path: ""
+    urdf_path: "robot/xarm_description/urdf/xarm7.urdf"
+    asset_root_path: "robot/xarm_description"
     
     base_link: "link_base"
     ee_link: "xarm_gripper_base_link"
@@ -45,7 +45,7 @@ robot_cfg:
         "right_finger",
         "right_inner_knuckle",
       ]
-    collision_spheres: "spheres/xarm.yml"
+    collision_spheres: "spheres/xarm7.yml"
     collision_sphere_buffer: 0.005
     extra_collision_spheres: {}
     use_global_cumul: True
