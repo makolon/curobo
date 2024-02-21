@@ -1,0 +1,113 @@
+##
+## Copyright (c) 2023 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+##
+## NVIDIA CORPORATION, its affiliates and licensors retain all intellectual
+## property and proprietary rights in and to this material, related
+## documentation and any modifications thereto. Any use, reproduction,
+## disclosure or distribution of this material and related documentation
+## without an express license agreement from NVIDIA CORPORATION or
+## its affiliates is strictly prohibited.
+##
+
+robot_cfg:
+  kinematics:
+    use_usd_kinematics: False
+    usd_path: "robot/xarm_description/xarm7.usd"
+    usd_robot_root: "/xarm7"
+    isaac_usd_path: ""
+    usd_flip_joints: {}
+    usd_flip_joint_limits: []
+
+    urdf_path: ""
+    asset_root_path: ""
+    
+    base_link: "link_base"
+    ee_link: "xarm_gripper_base_link"
+    link_names: null
+    lock_joints: null
+    extra_links: null
+
+    collision_link_names:
+      [
+        "link_base",
+        "link1",
+        "link2",
+        "link3",
+        "link4",
+        "link5",
+        "link6",
+        "link7",
+        "xarm_gripper_base_link",
+        "left_outer_knuckle",
+        "left_figer",
+        "left_inner_knuckle",
+        "right_outer_knuckle",
+        "right_finger",
+        "right_inner_knuckle",
+      ]
+    collision_spheres: "spheres/xarm.yml"
+    collision_sphere_buffer: 0.005
+    extra_collision_spheres: {}
+    use_global_cumul: True
+    self_collision_ignore:
+      {
+        "link_base": ["link1", "link2"],
+        "link1": ["link2", "link3", "link4"],
+        "link2": ["link3", "link4"],
+        "link3": ["link4", "link5"],
+        "link4": ["link5", "link6", "link7"],
+        "link5": ["link6", "link7", "xarm_gripper_base_link", "left_finger", "right_finger"],
+        "link6": ["link7", "xarm_gripper_base_link", "left_finger", "right_finger"],
+        "link7": ["xarm_gripper_base_link", "left_finger", "right_finger"],
+        "xarm_gripper_base_link": ["left_finger", "right_finger"],
+        "left_outer_knuckle": ["left_finger", "left_inner_knuckle"],
+        "left_finger": ["left_inner_knuckle"],
+        "right_outer_knuckle": ["right_finger", "right_inner_knuckle"],
+        "right_finger": ["right_inner_knuckle"],
+      }
+    self_collision_buffer:
+      {
+        "link_base": 0.1,
+        "link1": 0.05,
+        "link2": 0.0,
+        "link3": 0.0,
+        "link4": 0.0,
+        "link5": 0.0,
+        "link6": 0.0,
+        "link7": 0.0,
+        "xarm_gripper_base_link": 0.02,
+        "left_outer_knuckle": 0.01,
+        "left_finger": 0.01,
+        "left_inner_knuckle": 0.01,
+        "right_outer_knuckle": 0.01,
+        "right_finger": 0.01,
+        "right_inner_knuckle": 0.01,
+      }
+    mesh_link_names:
+      [
+        "link_base",
+        "link1",
+        "link2",
+        "link3",
+        "link4",
+        "link5",
+        "link6",
+        "link7",
+        "xarm_gripper_base_link",
+        "left_outer_knuckle",
+        "left_figer",
+        "left_inner_knuckle",
+        "right_outer_knuckle",
+        "right_finger",
+        "right_inner_knuckle",
+      ]
+    external_asset_path: null # Use this to add path for externally located assets/robot folder.
+
+    cspace:
+      joint_names: ['joint1', 'joint2', 'joint3', 'joint4', 'joint5', 'joint6', 'join7',
+        'left_drive_joint', 'right_drive_oint']
+      retract_config: [0.0, -1.3, 0.0, -2.5, 0.0, 1.0, 0., 0.04, 0.04] # TODO: fix
+      null_space_weight: [1,1,1,1,1,1,1,1,1]
+      cspace_distance_weight: [1,1,1,1,1,1,1,1,1]
+      max_jerk: 500.0
+      max_acceleration: 15.0
