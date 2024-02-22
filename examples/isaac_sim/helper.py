@@ -13,12 +13,72 @@
 from typing import Dict, List
 
 # Third Party
+import math
 import numpy as np
 from matplotlib import cm
 from omni.isaac.core import World
 from omni.isaac.core.materials import OmniPBR
 from omni.isaac.core.objects import cuboid
 from omni.isaac.core.robots import Robot
+from omni.isaac.core.utils.prims import get_prim_at_path
+from omni.isaac.core.utils.stage import add_reference_to_stage, get_current_stage
+from xarm_rl.tasks.utils.usd_utils import set_drive
+from pxr import UsdPhysics, UsdLux, PhysxSchema
+
+def set_drive_type(prim_path, drive_type):
+    joint_prim = get_prim_at_path(prim_path)
+
+    # set drive type ("angular" or "linear")
+    drive = UsdPhysics.DriveAPI.Apply(joint_prim, drive_type)
+    return drive
+
+def set_drive_target_position(drive, target_value):
+    if not drive.GetTargetPositionAttr():
+        drive.CreateTargetPositionAttr(target_value)
+    else:
+        drive.GetTargetPositionAttr().Set(target_value)
+
+def set_drive_target_velocity(drive, target_value):
+    if not drive.GetTargetVelocityAttr():
+        drive.CreateTargetVelocityAttr(target_value)
+    else:
+        drive.GetTargetVelocityAttr().Set(target_value)
+
+def set_drive_stiffness(drive, stiffness):
+    if not drive.GetStiffnessAttr():
+        drive.CreateStiffnessAttr(stiffness)
+    else:
+        drive.GetStiffnessAttr().Set(stiffness)
+
+def set_drive_damping(drive, damping):
+    if not drive.GetDampingAttr():
+        drive.CreateDampingAttr(damping)
+    else:
+        drive.GetDampingAttr().Set(damping)
+
+def set_drive_max_force(drive, max_force):
+    if not drive.GetMaxForceAttr():
+        drive.CreateMaxForceAttr(max_force)
+    else:
+        drive.GetMaxForceAttr().Set(max_force)
+
+def set_drive(prim_path, drive_type, target_type, target_value, stiffness, damping, max_force) -> None:
+    drive = set_drive_type(prim_path, drive_type)
+
+    # set target type ("position" or "velocity")
+    if target_type == "position":
+        set_drive_target_position(drive, target_value)
+    elif target_type == "velocity":
+        set_drive_target_velocity(drive, target_value)
+
+    set_drive_stiffness(drive, stiffness)
+    set_drive_damping(drive, damping)
+    set_drive_max_force(drive, max_force)
+
+def create_distant_light(prim_path="/World/defaultDistantLight", intensity=5000):
+    stage = get_current_stage()
+    light = UsdLux.DistantLight.Define(stage, prim_path)
+    light.GetPrim().GetAttribute("intensity").Set(intensity)
 
 # CuRobo
 from curobo.util.logger import log_warn
@@ -57,6 +117,73 @@ def add_extensions(simulation_app, headless_mode: Optional[str] = None):
     return True
 
 
+class xArm(Robot):
+    def __init__(
+        self,
+        prim_path: str,
+        name: Optional[str] = "xarm7",
+        usd_path: Optional[str] = None,
+        translation: Optional[np.ndarray] = None,
+        orientation: Optional[np.ndarray] = None,
+    ) -> None:
+
+        self._usd_path = usd_path
+        self._name = name
+
+        if self._usd_path is None:
+            self._usd_path = "/pkgs/curobo/src/curobo/content/assets/robot/xarm_description/usd/xarm7.usd"
+
+        add_reference_to_stage(self._usd_path, prim_path)
+
+        super().__init__(
+            prim_path=prim_path,
+            name=name,
+            translation=translation,
+            orientation=orientation,
+            articulation_controller=None,
+        )
+
+        dof_paths = [
+            "link_base/joint1",
+            "link1/joint2",
+            "link2/joint3",
+            "link3/joint4",
+            "link4/joint5",
+            "link5/joint6",
+            "link6/joint7",
+            "xarm_gripper_base_link/left_drive_joint",
+            "xarm_gripper_base_link/right_drive_joint",
+        ]
+
+        drive_type = ["angular"] * 9
+        default_dof_pos = [math.degrees(x) for x in [0.0, -0.698, 0.0, 0.349, 0.0, 1.047, 0.0, 0.0, 0.0]]
+        stiffness = [400 * np.pi / 180] * 7 + [80 * np.pi / 180] * 2
+        damping = [80 * np.pi / 180] * 7 + [160 * np.pi / 180] * 2
+        max_force = [87, 87, 87, 87, 12, 12, 12, 200, 200]
+        max_velocity = [math.degrees(x) for x in [2.175, 2.175, 2.175, 2.175, 2.61, 2.61, 2.61, 2.0, 2.0]]
+
+        for i, dof in enumerate(dof_paths):
+            set_drive(
+                prim_path=f"{self.prim_path}/{dof}",
+                drive_type=drive_type[i],
+                target_type="position",
+                target_value=default_dof_pos[i],
+                stiffness=stiffness[i],
+                damping=damping[i],
+                max_force=max_force[i],
+            )
+
+            PhysxSchema.PhysxJointAPI(get_prim_at_path(f"{self.prim_path}/{dof}")).CreateMaxJointVelocityAttr().Set(
+                max_velocity[i]
+            )
+
+    def set_xarm_properties(self, stage, prim):
+        for link_prim in prim.GetChildren():
+            if link_prim.HasAPI(PhysxSchema.PhysxRigidBodyAPI): 
+                rb = PhysxSchema.PhysxRigidBodyAPI.Get(stage, link_prim.GetPrimPath())
+                rb.GetDisableGravityAttr().Set(True)
+
+
 ############################################################
 def add_robot_to_scene(
     robot_config: Dict,
@@ -66,51 +193,49 @@ def add_robot_to_scene(
     robot_name: str = "robot",
     position: np.array = np.array([0, 0, 0]),
 ):
-    urdf_interface = _urdf.acquire_urdf_interface()
+    if load_from_usd:
+        robot_path = "/World/xarm7"
+        robot_p = xArm(robot_path, name="xarm7", translation=position)
+    else:
+        urdf_interface = _urdf.acquire_urdf_interface()
 
-    import_config = _urdf.ImportConfig()
-    import_config.merge_fixed_joints = False
-    import_config.convex_decomp = False
-    import_config.import_inertia_tensor = True
-    import_config.fix_base = True
-    import_config.make_default_prim = False
-    import_config.self_collision = False
-    import_config.create_physics_scene = True
-    import_config.import_inertia_tensor = False
-    import_config.default_drive_strength = 20000
-    import_config.default_position_drive_damping = 500
-    import_config.default_drive_type = _urdf.UrdfJointTargetType.JOINT_DRIVE_POSITION
-    import_config.distance_scale = 1
-    import_config.density = 0.0
-    asset_path = get_assets_path()
-    if (
-        "external_asset_path" in robot_config["kinematics"]
-        and robot_config["kinematics"]["external_asset_path"] is not None
-    ):
-        asset_path = robot_config["kinematics"]["external_asset_path"]
-    full_path = join_path(asset_path, robot_config["kinematics"]["urdf_path"])
-    robot_path = get_path_of_dir(full_path)
-    filename = get_filename(full_path)
-    imported_robot = urdf_interface.parse_urdf(robot_path, filename, import_config)
-    dest_path = subroot
-    robot_path = urdf_interface.import_robot(
-        robot_path,
-        filename,
-        imported_robot,
-        import_config,
-        dest_path,
-    )
-
-    # prim_path = omni.usd.get_stage_next_free_path(
-    # my_world.scene.stage, str(my_world.scene.stage.GetDefaultPrim().GetPath()) + robot_path, False)
-    # print(prim_path)
-    # robot_prim = my_world.scene.stage.OverridePrim(prim_path)
-    # robot_prim.GetReferences().AddReference(dest_path)
-    robot_p = Robot(
-        prim_path=robot_path,
-        name=robot_name,
-        position=position,
-    )
+        import_config = _urdf.ImportConfig()
+        import_config.merge_fixed_joints = False
+        import_config.convex_decomp = False
+        import_config.import_inertia_tensor = True
+        import_config.fix_base = True
+        import_config.make_default_prim = False
+        import_config.self_collision = False
+        import_config.create_physics_scene = True
+        import_config.import_inertia_tensor = False
+        import_config.default_drive_strength = 20000
+        import_config.default_position_drive_damping = 500
+        import_config.default_drive_type = _urdf.UrdfJointTargetType.JOINT_DRIVE_POSITION
+        import_config.distance_scale = 1
+        import_config.density = 0.0
+        asset_path = get_assets_path()
+        if (
+            "external_asset_path" in robot_config["kinematics"]
+            and robot_config["kinematics"]["external_asset_path"] is not None
+        ):
+            asset_path = robot_config["kinematics"]["external_asset_path"]
+        full_path = join_path(asset_path, robot_config["kinematics"]["urdf_path"])
+        robot_path = get_path_of_dir(full_path)
+        filename = get_filename(full_path)
+        imported_robot = urdf_interface.parse_urdf(robot_path, filename, import_config)
+        dest_path = subroot
+        robot_path = urdf_interface.import_robot(
+            robot_path,
+            filename,
+            imported_robot,
+            import_config,
+            dest_path,
+        )
+        robot_p = Robot(
+            prim_path=robot_path,
+            name=robot_name,
+            position=position,
+        )
     if ISAAC_SIM_23:
         robot_p.set_solver_velocity_iteration_count(4)
         robot_p.set_solver_position_iteration_count(44)

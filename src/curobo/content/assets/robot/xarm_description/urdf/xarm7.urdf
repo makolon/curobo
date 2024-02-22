@@ -356,6 +356,11 @@
       </geometry>
     </collision>
   </link>
+  <joint name="left_finger_fixed_joint" type="fixed">
+    <origin rpy="0 0 0" xyz="0 0.0205 0.027"/>
+    <parent link="left_finger"/>
+    <child link="left_inner_knuckle"/>
+  </joint>
 
   <!-- right gripper -->
   <joint name="right_drive_joint" type="revolute">
@@ -445,6 +450,11 @@
       </geometry>
     </collision>
   </link>
+  <joint name="right_finger_fixed_joint" type="fixed">
+    <origin rpy="0 0 0" xyz="0 -0.0205 0.027"/>
+    <parent link="right_finger"/>
+    <child link="right_inner_knuckle"/>
+  </joint>
 
   <transmission name="tran1">
     <type>transmission_interface/SimpleTransmission</type>

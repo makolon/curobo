@@ -107,7 +107,6 @@ from curobo.wrap.reacher.motion_gen import MotionGen, MotionGenConfig, MotionGen
 
 def main():
     # create a curobo motion gen instance:
-
     # assuming obstacles are in objects_path:
     my_world = World(stage_units_in_meters=1.0)
     stage = my_world.stage
@@ -115,9 +114,7 @@ def main():
     xform = stage.DefinePrim("/World", "Xform")
     stage.SetDefaultPrim(xform)
     stage.DefinePrim("/curobo", "Xform")
-    # my_world.stage.SetDefaultPrim(my_world.stage.GetPrimAtPath("/World"))
     stage = my_world.stage
-    # stage.SetDefaultPrim(stage.GetPrimAtPath("/World"))
 
     # Make a target to follow
     target = cuboid.VisualCuboid(
@@ -194,7 +191,6 @@ def main():
     motion_gen = MotionGen(motion_gen_config)
     print("warming up...")
     motion_gen.warmup(enable_graph=True, warmup_js_trajopt=False, parallel_finetune=True)
-
     print("Curobo is Ready")
 
     add_extensions(simulation_app, args.headless_mode)
@@ -222,12 +218,9 @@ def main():
             if i % 100 == 0:
                 print("**** Click Play to start simulation *****")
             i += 1
-            # if step_index == 0:
-            #    my_world.play()
             continue
 
         step_index = my_world.current_time_step_index
-        # print(step_index)
         if step_index < 2:
             my_world.reset()
             robot._articulation_view.initialize()
@@ -243,7 +236,6 @@ def main():
         if step_index == 50 or step_index % 1000 == 0.0:
             print("Updating world, reading w.r.t.", robot_prim_path)
             obstacles = usd_help.get_obstacles_from_stage(
-                # only_paths=[obstacles_path],
                 reference_prim_path=robot_prim_path,
                 ignore_substring=[
                     robot_prim_path,
@@ -293,8 +285,6 @@ def main():
 
             if spheres is None:
                 spheres = []
-                # create spheres:
-
                 for si, s in enumerate(sph_list[0]):
                     sp = sphere.VisualSphere(
                         prim_path="/curobo/robot_sphere_" + str(si),
