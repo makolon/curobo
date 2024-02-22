@@ -22,7 +22,7 @@ robot_cfg:
     asset_root_path: "robot/xarm_description"
     
     base_link: "link_base"
-    ee_link: "xarm_gripper_base_link" # "fingertip_centered"
+    ee_link: "xarm_gripper_base_link"
     link_names: null
     lock_joints: null
 
@@ -44,7 +44,7 @@ robot_cfg:
         "right_finger",
         "right_inner_knuckle",
       ]
-    collision_spheres: "spheres/xarm7.yml"
+    collision_spheres: "spheres/xarm7_with_gripper.yml"
     collision_sphere_buffer: 0.005
     extra_collision_spheres: {}
     use_global_cumul: True
