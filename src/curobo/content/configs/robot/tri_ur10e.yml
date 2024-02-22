@@ -46,9 +46,6 @@ robot_cfg:
       "wrist_1_link_2": ["wrist_2_link_2","wrist_3_link_2"],
       "wrist_2_link_2": ["wrist_3_link_2", "tool2"],
       "wrist_3_link_2": ["tool2"],
-
-      
-    
       }
     self_collision_buffer: {
       'shoulder_link': 0.05,

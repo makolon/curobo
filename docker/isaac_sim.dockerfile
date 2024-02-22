@@ -135,9 +135,6 @@ RUN $omni_python -m pip install "robometrics[evaluator] @ git+https://github.com
 RUN mkdir /pkgs
 RUN cd /pkgs && \
     git clone https://github.com/makolon/curobo.git 
-# RUN cd /pkgs && \
-#     mkdir curobo
-# COPY ../ /pkgs/curobo/
 RUN $omni_python -m pip install ninja wheel tomli
 RUN cd /pkgs/curobo && $omni_python -m pip install .[dev] --no-build-isolation
 WORKDIR /pkgs/curobo

@@ -93,3 +93,45 @@ collision_spheres:
       radius: 0.042
     - center: [0.0, 0.025, 0.08]
       radius: 0.042
+  left_outer_knuckle:
+    - center: [0.0, 0.042, 0.025]
+      radius: 0.012
+    - center: [0.0, 0.03, 0.015]
+      radius: 0.012
+    - center: [0.0, 0.015, 0.005]
+      radius: 0.012
+  left_finger:
+    - center: [0.0, 0.0, 0.0]
+      radius: 0.012
+    - center: [0.0, -0.01, 0.01]
+      radius: 0.012
+    - center: [0.0, -0.02, 0.02]
+      radius: 0.012
+    - center: [0.0, -0.02, 0.035]
+      radius: 0.012
+    - center: [0.0, -0.02, 0.05]
+      radius: 0.012
+  left_inner_knuckle:
+    - center: [0.0, 0.025, 0.03]
+      radius: 0.012
+  right_outer_knuckle:
+    - center: [0.0, -0.042, 0.025]
+      radius: 0.012
+    - center: [0.0, -0.03, 0.015]
+      radius: 0.012
+    - center: [0.0, -0.015, 0.005]
+      radius: 0.012
+  right_finger:
+    - center: [0.0, 0.0, 0.0]
+      radius: 0.012
+    - center: [0.0, 0.01, 0.01]
+      radius: 0.012
+    - center: [0.0, 0.02, 0.02]
+      radius: 0.012
+    - center: [0.0, 0.02, 0.035]
+      radius: 0.012
+    - center: [0.0, 0.02, 0.05]
+      radius: 0.012
+  right_inner_knuckle:
+    - center: [0.0, -0.025, 0.03]
+      radius: 0.012
