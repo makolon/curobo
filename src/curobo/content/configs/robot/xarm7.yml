@@ -22,10 +22,9 @@ robot_cfg:
     asset_root_path: "robot/xarm_description"
     
     base_link: "link_base"
-    ee_link: "xarm_gripper_base_link"
+    ee_link: "xarm_gripper_base_link" # "fingertip_centered"
     link_names: null
     lock_joints: null
-    extra_links: null
 
     collision_link_names:
       [
@@ -101,11 +100,11 @@ robot_cfg:
         "right_finger",
         "right_inner_knuckle",
       ]
-    external_asset_path: null # Use this to add path for externally located assets/robot folder.
 
     cspace:
       joint_names: ['joint1', 'joint2', 'joint3', 'joint4', 'joint5', 'joint6', 'joint7',
-        'left_drive_joint', 'right_drive_oint']
+        'left_drive_joint', 'left_finger_joint', 'left_inner_knuckle_joint',
+        'right_drive_joint', 'right_finger_joint', 'right_inner_knuckle_joint']
       retract_config: [0.0, -1.3, 0.0, -2.5, 0.0, 1.0, 0., 0.04, 0.04] # TODO: fix this
       null_space_weight: [1,1,1,1,1,1,1,1,1]
       cspace_distance_weight: [1,1,1,1,1,1,1,1,1]

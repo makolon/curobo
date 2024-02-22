@@ -27,32 +27,33 @@ fi
 if [ "$input_arg" == "x86" ]; then
 
     docker run --rm -it \
-    --privileged \
-    -e NVIDIA_DISABLE_REQUIRE=1 \
-    -e NVIDIA_DRIVER_CAPABILITIES=all  --device /dev/dri \
-    --hostname ros1-docker \
-    --add-host ros1-docker:127.0.0.1 \
-    --gpus all \
-    --network host \
-    --env DISPLAY=unix$DISPLAY \
-    --volume /tmp/.X11-unix:/tmp/.X11-unix \
-    --volume /dev:/dev \
-    curobo_docker:$input_arg
+        --privileged \
+        -e NVIDIA_DISABLE_REQUIRE=1 \
+        -e NVIDIA_DRIVER_CAPABILITIES=all \
+        --device /dev/dri \
+        --hostname ros1-docker \
+        --add-host ros1-docker:127.0.0.1 \
+        --gpus all \
+        --network host \
+        --env DISPLAY=unix$DISPLAY \
+        --volume /tmp/.X11-unix:/tmp/.X11-unix \
+        --volume /dev:/dev \
+        curobo_docker:$input_arg
 
 elif [ "$input_arg" == "aarch64" ]; then
 
     docker run --rm -it \
-    --privileged \
-    --runtime nvidia \
-    --hostname ros1-docker \
-    --add-host ros1-docker:127.0.0.1 \
-    --network host \
-    --gpus all \
-    --env ROS_HOSTNAME=localhost \
-    --env DISPLAY=$DISPLAY \
-    --volume /tmp/.X11-unix:/tmp/.X11-unix \
-    --volume /dev/input:/dev/input \
-    curobo_docker:$input_arg
+        --privileged \
+        --runtime nvidia \
+        --hostname ros1-docker \
+        --add-host ros1-docker:127.0.0.1 \
+        --network host \
+        --gpus all \
+        --env ROS_HOSTNAME=localhost \
+        --env DISPLAY=$DISPLAY \
+        --volume /tmp/.X11-unix:/tmp/.X11-unix \
+        --volume /dev/input:/dev/input \
+        curobo_docker:$input_arg
 
 elif [[ "$input_arg" == *isaac_sim* ]] ; then
 

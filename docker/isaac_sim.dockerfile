@@ -11,12 +11,12 @@
 ARG DEBIAN_FRONTEND=noninteractive
 ARG BASE_DIST=ubuntu20.04
 ARG CUDA_VERSION=11.4.2
-ARG ISAAC_SIM_VERSION=2022.2.1
+ARG ISAAC_SIM_VERSION=2023.1.1
 
 FROM nvcr.io/nvidia/isaac-sim:${ISAAC_SIM_VERSION} AS isaac-sim
 FROM nvcr.io/nvidia/cudagl:${CUDA_VERSION}-devel-${BASE_DIST}
 
-# this does not work for 2022.2.1
+# this does not work for 2023.1.1
 LABEL maintainer "User Name"
 
 ARG VULKAN_SDK_VERSION=1.3.224.1
@@ -131,12 +131,13 @@ RUN echo "alias omni_python='/isaac-sim/python.sh'" >> ~/.bashrc
 ARG CACHE_DATE=2023-12-15 
 RUN $omni_python -m pip install "robometrics[evaluator] @ git+https://github.com/fishbotics/robometrics.git"
 
+# Install curobo from source https://github.com/NVlabs/curobo.git or https://github.com/makolon/curobo.git
 RUN mkdir /pkgs
-
-# Install curobo
 RUN cd /pkgs && \
-    mkdir curobo
-COPY ../ /pkgs/curobo/
+    git clone https://github.com/makolon/curobo.git 
+# RUN cd /pkgs && \
+#     mkdir curobo
+# COPY ../ /pkgs/curobo/
 RUN $omni_python -m pip install ninja wheel tomli
 RUN cd /pkgs/curobo && $omni_python -m pip install .[dev] --no-build-isolation
 WORKDIR /pkgs/curobo
