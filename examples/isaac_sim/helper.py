@@ -22,7 +22,6 @@ from omni.isaac.core.objects import cuboid
 from omni.isaac.core.robots import Robot
 from omni.isaac.core.utils.prims import get_prim_at_path
 from omni.isaac.core.utils.stage import add_reference_to_stage, get_current_stage
-from xarm_rl.tasks.utils.usd_utils import set_drive
 from pxr import UsdPhysics, UsdLux, PhysxSchema
 
 def set_drive_type(prim_path, drive_type):

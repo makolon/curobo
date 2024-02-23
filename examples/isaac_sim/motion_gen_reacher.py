@@ -147,7 +147,7 @@ def main():
     j_names = robot_cfg["kinematics"]["cspace"]["joint_names"]
     default_config = robot_cfg["kinematics"]["cspace"]["retract_config"]
 
-    robot, robot_prim_path = add_robot_to_scene(robot_cfg, my_world)
+    robot, robot_prim_path = add_robot_to_scene(robot_cfg, my_world, load_from_usd=True)
 
     articulation_controller = robot.get_articulation_controller()
 
