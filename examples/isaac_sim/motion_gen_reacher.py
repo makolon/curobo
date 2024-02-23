@@ -116,7 +116,7 @@ def main():
     stage.DefinePrim("/curobo", "Xform")
     stage = my_world.stage
 
-    # Make a target to follow
+    # make a target to follow
     target = cuboid.VisualCuboid(
         "/World/target",
         position=np.array([0.5, 0, 0.5]),
@@ -147,20 +147,26 @@ def main():
     j_names = robot_cfg["kinematics"]["cspace"]["joint_names"]
     default_config = robot_cfg["kinematics"]["cspace"]["retract_config"]
 
+    # load robot to scene
     robot, robot_prim_path = add_robot_to_scene(robot_cfg, my_world, load_from_usd=True)
 
+    # define articulation controller
     articulation_controller = robot.get_articulation_controller()
 
+    # define table_collision
     world_cfg_table = WorldConfig.from_dict(
         load_yaml(join_path(get_world_configs_path(), "collision_table.yml"))
     )
     world_cfg_table.cuboid[0].pose[2] -= 0.04
+
+    # define mesh_collision
     world_cfg1 = WorldConfig.from_dict(
         load_yaml(join_path(get_world_configs_path(), "collision_table.yml"))
     ).get_mesh_world()
     world_cfg1.mesh[0].name += "_mesh"
     world_cfg1.mesh[0].pose[2] = -10.5
 
+    # define collision model throught WorldConfig
     world_cfg = WorldConfig(cuboid=world_cfg_table.cuboid, mesh=world_cfg1.mesh)
 
     trajopt_dt = None
@@ -174,6 +180,8 @@ def main():
         optimize_dt = False
         max_attemtps = 1
         trim_steps = [1, None]
+
+    # define motion generation config
     motion_gen_config = MotionGenConfig.load_from_robot_config(
         robot_cfg,
         world_cfg,
@@ -188,6 +196,8 @@ def main():
         trajopt_tsteps=trajopt_tsteps,
         trim_steps=trim_steps,
     )
+
+    # load motion generation
     motion_gen = MotionGen(motion_gen_config)
     print("warming up...")
     motion_gen.warmup(enable_graph=True, warmup_js_trajopt=False, parallel_finetune=True)
@@ -195,6 +205,7 @@ def main():
 
     add_extensions(simulation_app, args.headless_mode)
 
+    # define planning config
     plan_config = MotionGenPlanConfig(
         enable_graph=False,
         enable_graph_attempt=2,
@@ -206,9 +217,11 @@ def main():
     usd_help.load_stage(my_world.stage)
     usd_help.add_world_to_stage(world_cfg, base_frame="/World")
 
+    # add ground plane
+    my_world.scene.add_default_ground_plane()
+
     cmd_plan = None
     cmd_idx = 0
-    my_world.scene.add_default_ground_plane()
     i = 0
     spheres = None
     past_cmd = None
@@ -264,7 +277,7 @@ def main():
             log_error("isaac sim has returned NAN joint position values.")
         cu_js = JointState(
             position=tensor_args.to_device(sim_js.positions),
-            velocity=tensor_args.to_device(sim_js.velocities),  # * 0.0,
+            velocity=tensor_args.to_device(sim_js.velocities),
             acceleration=tensor_args.to_device(sim_js.velocities) * 0.0,
             jerk=tensor_args.to_device(sim_js.velocities) * 0.0,
             joint_names=sim_js_names,
