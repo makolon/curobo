@@ -105,10 +105,9 @@ robot_cfg:
       "right_finger_joint": 0.0, "right_inner_knuckle_joint": 0.0}
     cspace:
       joint_names: ['joint1', 'joint2', 'joint3', 'joint4', 'joint5', 'joint6', 'joint7',
-        'left_drive_joint', 'left_finger_joint', 'left_inner_knuckle_joint', 
-        'right_drive_joint', 'right_finger_joint', 'right_inner_knuckle_joint']
-      retract_config: [0.0, -0.698, 0.0, 0.349, 0.0, 1.047,0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
-      null_space_weight: [1,1,1,1,1,1,1,1,1,1,1,1,1]
-      cspace_distance_weight: [1,1,1,1,1,1,1,1,1,1,1,1,1]
+        'left_drive_joint', 'right_drive_joint']
+      retract_config: [0.0, -0.698, 0.0, 0.349, 0.0, 1.047,0.0, 0.0, 0.0]
+      null_space_weight: [1,1,1,1,1,1,1,1,1]
+      cspace_distance_weight: [1,1,1,1,1,1,1,1,1]
       max_jerk: 500.0
       max_acceleration: 15.0
