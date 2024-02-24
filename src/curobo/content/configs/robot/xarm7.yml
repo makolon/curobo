@@ -22,7 +22,7 @@ robot_cfg:
     asset_root_path: "robot/xarm_description"
     
     base_link: "link_base"
-    ee_link: "xarm_gripper_base_link"
+    ee_link: "fingertip_centered"
     link_names: null
     lock_joints: null
 
