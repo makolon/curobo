@@ -195,9 +195,6 @@ def add_robot_to_scene(
     if load_from_usd:
         robot_path = "/World/xarm7"
         robot_p = xArm(robot_path, name="xarm7", translation=position)
-        robot_p.set_joints_default_state(
-            positions=np.array(robot_config["kinematics"]["cspace"]["retract_config"])
-        )
     else:
         urdf_interface = _urdf.acquire_urdf_interface()
 
