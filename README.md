@@ -44,7 +44,6 @@ cuRobo performs trajectory optimization across many seeds in parallel to find a 
 ```
 cd ~/
 git clone git@github.com:makolon/curobo.git
-
 ```
 2. Build docker
 ```
