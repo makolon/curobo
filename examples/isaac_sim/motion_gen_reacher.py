@@ -51,6 +51,32 @@ parser.add_argument(
     help="When True, runs in reactive mode",
     default=False,
 )
+
+parser.add_argument(
+    "--constrain_grasp_approach",
+    action="store_true",
+    help="When True, approaches grasp with fixed orientation and motion only along z axis.",
+    default=False,
+)
+
+parser.add_argument(
+    "--reach_partial_pose",
+    nargs=6,
+    metavar=("qx", "qy", "qz", "x", "y", "z"),
+    help="Reach partial pose",
+    type=float,
+    default=None,
+)
+parser.add_argument(
+    "--hold_partial_pose",
+    nargs=6,
+    metavar=("qx", "qy", "qz", "x", "y", "z"),
+    help="Hold partial pose while moving to goal",
+    type=float,
+    default=None,
+)
+
+
 args = parser.parse_args()
 
 ############################################################
@@ -97,7 +123,12 @@ from curobo.util_file import (
     join_path,
     load_yaml,
 )
-from curobo.wrap.reacher.motion_gen import MotionGen, MotionGenConfig, MotionGenPlanConfig
+from curobo.wrap.reacher.motion_gen import (
+    MotionGen,
+    MotionGenConfig,
+    MotionGenPlanConfig,
+    PoseCostMetric,
+)
 
 ############################################################
 
@@ -157,7 +188,7 @@ def main():
     world_cfg_table = WorldConfig.from_dict(
         load_yaml(join_path(get_world_configs_path(), "collision_table.yml"))
     )
-    world_cfg_table.cuboid[0].pose[2] -= 0.04
+    world_cfg_table.cuboid[0].pose[2] -= 0.02
 
     # define mesh_collision
     world_cfg1 = WorldConfig.from_dict(
@@ -174,14 +205,15 @@ def main():
     trajopt_tsteps = 32
     trim_steps = None
     max_attempts = 4
+    interpolation_dt = 0.05
     if args.reactive:
-        trajopt_tsteps = 36
+        trajopt_tsteps = 40
         trajopt_dt = 0.05
         optimize_dt = False
-        max_attemtps = 1
+        max_attempts = 1
         trim_steps = [1, None]
+        interpolation_dt = trajopt_dt
 
-    # define motion generation config
     motion_gen_config = MotionGenConfig.load_from_robot_config(
         robot_cfg,
         world_cfg,
@@ -189,7 +221,7 @@ def main():
         collision_checker_type=CollisionCheckerType.MESH,
         num_trajopt_seeds=12,
         num_graph_seeds=12,
-        interpolation_dt=0.05,
+        interpolation_dt=interpolation_dt,
         collision_cache={"obb": n_obstacle_cuboids, "mesh": n_obstacle_mesh},
         optimize_dt=optimize_dt,
         trajopt_dt=trajopt_dt,
@@ -225,6 +257,9 @@ def main():
     i = 0
     spheres = None
     past_cmd = None
+    target_orientation = None
+    past_orientation = None
+    pose_metric = None
     while simulation_app.is_running():
         my_world.step(render=True)
         if not my_world.is_playing():
@@ -234,6 +269,10 @@ def main():
             continue
 
         step_index = my_world.current_time_step_index
+
+        if articulation_controller is None:
+            articulation_controller = robot.get_articulation_controller()
+
         if step_index < 2:
             my_world.reset()
             robot._articulation_view.initialize()
@@ -270,6 +309,10 @@ def main():
             past_pose = cube_position
         if target_pose is None:
             target_pose = cube_position
+        if target_orientation is None:
+            target_orientation = cube_orientation
+        if past_orientation is None:
+            past_orientation = cube_orientation
 
         sim_js = robot.get_joints_state()
         sim_js_names = robot.dof_names
@@ -316,8 +359,12 @@ def main():
         if (np.max(np.abs(sim_js.velocities)) < 0.2) or args.reactive:
             robot_static = True
         if (
-            np.linalg.norm(cube_position - target_pose) > 1e-3
+            (
+                np.linalg.norm(cube_position - target_pose) > 1e-3
+                or np.linalg.norm(cube_orientation - target_orientation) > 1e-3
+            )
             and np.linalg.norm(past_pose - cube_position) == 0.0
+            and np.linalg.norm(past_orientation - cube_orientation) == 0.0
             and robot_static
         ):
             # Set EE teleop goals, use cube for simple non-vr init:
@@ -329,11 +376,24 @@ def main():
                 position=tensor_args.to_device(ee_translation_goal),
                 quaternion=tensor_args.to_device(ee_orientation_teleop_goal),
             )
-
+            plan_config.pose_cost_metric = pose_metric
             result = motion_gen.plan_single(cu_js.unsqueeze(0), ik_goal, plan_config)
 
-            succ = result.success.item()
+            succ = result.success.item()  # ik_result.success.item()
+            if num_targets == 1:
+                if args.constrain_grasp_approach:
+                    pose_metric = PoseCostMetric.create_grasp_approach_metric()
+                if args.reach_partial_pose is not None:
+                    reach_vec = motion_gen.tensor_args.to_device(args.reach_partial_pose)
+                    pose_metric = PoseCostMetric(
+                        reach_partial_pose=True, reach_vec_weight=reach_vec
+                    )
+                if args.hold_partial_pose is not None:
+                    hold_vec = motion_gen.tensor_args.to_device(args.hold_partial_pose)
+                    pose_metric = PoseCostMetric(hold_partial_pose=True, hold_vec_weight=hold_vec)
+
             if succ:
+                num_targets += 1
                 cmd_plan = result.get_interpolated_plan()
                 cmd_plan = motion_gen.get_full_js(cmd_plan)
                 # get only joint names that are in both:
@@ -351,7 +411,10 @@ def main():
             else:
                 carb.log_warn("Plan did not converge to a solution.  No action is being taken.")
             target_pose = cube_position
+            target_orientation = cube_orientation
+
         past_pose = cube_position
+        past_orientation = cube_orientation
         if cmd_plan is not None:
             cmd_state = cmd_plan[cmd_idx]
             past_cmd = cmd_state.clone()
