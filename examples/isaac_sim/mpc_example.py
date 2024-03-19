@@ -143,11 +143,8 @@ def main():
     xform = stage.DefinePrim("/World", "Xform")
     stage.SetDefaultPrim(xform)
     stage.DefinePrim("/curobo", "Xform")
-    # my_world.stage.SetDefaultPrim(my_world.stage.GetPrimAtPath("/World"))
     stage = my_world.stage
     my_world.scene.add_default_ground_plane()
-
-    # stage.SetDefaultPrim(stage.GetPrimAtPath("/World"))
 
     # Make a target to follow
     target = cuboid.VisualCuboid(
@@ -165,7 +162,6 @@ def main():
 
     # warmup curobo instance
     usd_help = UsdHelper()
-    target_pose = None
 
     tensor_args = TensorDeviceType()
 
@@ -175,7 +171,7 @@ def main():
     default_config = robot_cfg["kinematics"]["cspace"]["retract_config"]
     robot_cfg["kinematics"]["collision_sphere_buffer"] += 0.02
 
-    robot, robot_prim_path = add_robot_to_scene(robot_cfg, my_world)
+    robot, robot_prim_path = add_robot_to_scene(robot_cfg, my_world, load_from_usd=True)
 
     articulation_controller = robot.get_articulation_controller()
 
@@ -280,7 +276,6 @@ def main():
         if step_index % 1000 == 0:
             print("Updating world")
             obstacles = usd_help.get_obstacles_from_stage(
-                # only_paths=[obstacles_path],
                 ignore_substring=[
                     robot_prim_path,
                     "/World/target",
@@ -310,8 +305,6 @@ def main():
             mpc.update_goal(goal_buffer)
             past_pose = cube_position
 
-        # if not changed don't call curobo:
-
         # get robot current state:
         sim_js = robot.get_joints_state()
         js_names = robot.dof_names
@@ -333,14 +326,12 @@ def main():
             )
             current_state.copy_(current_state_partial)
             current_state.joint_names = current_state_partial.joint_names
-            # current_state = current_state.get_ordered_joint_state(mpc.rollout_fn.joint_names)
         common_js_names = []
         current_state.copy_(cu_js)
 
         mpc_result = mpc.step(current_state, max_attempts=2)
-        # ik_result = ik_solver.solve_single(ik_goal, cu_js.position.view(1,-1), cu_js.position.view(1,1,-1))
 
-        succ = True  # ik_result.success.item()
+        succ = True
         cmd_state_full = mpc_result.js_action
         common_js_names = []
         idx_list = []
@@ -354,7 +345,6 @@ def main():
 
         art_action = ArticulationAction(
             cmd_state.position.cpu().numpy(),
-            # cmd_state.velocity.cpu().numpy(),
             joint_indices=idx_list,
         )
         # positions_goal = articulation_action.joint_positions

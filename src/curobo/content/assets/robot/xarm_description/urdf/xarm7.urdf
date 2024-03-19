@@ -268,6 +268,20 @@
     </collision>
   </link>
 
+  <!-- fingertip -->
+  <link name="fingertip_centered">
+    <inertial>
+      <origin rpy="0 0 0" xyz="0 0 0"/>
+      <mass value="0.0001"/>
+      <inertia ixx="0.0" ixy="0.0" ixz="0.0" iyy="0.0" iyz="0.0" izz="0.0"/>
+    </inertial>
+  </link>
+  <joint name="fingertip_fixed_joint">
+    <parent link="xarm_gripper_base_link"/>
+    <child link='fingertip_centered'/>
+    <origin rpy="0 0 0" xyz="0 0 0.1455"/>
+  </joint>
+
   <!-- left gripper -->
   <joint name="left_drive_joint" type="revolute">
     <origin rpy="0 0 0" xyz="0 0.035 0.059098"/>
