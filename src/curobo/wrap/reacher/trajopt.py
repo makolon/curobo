@@ -30,6 +30,7 @@ from curobo.opt.newton.newton_base import NewtonOptBase, NewtonOptConfig
 from curobo.opt.particle.parallel_es import ParallelES, ParallelESConfig
 from curobo.opt.particle.parallel_mppi import ParallelMPPI, ParallelMPPIConfig
 from curobo.rollout.arm_reacher import ArmReacher, ArmReacherConfig
+from curobo.rollout.cost.pose_cost import PoseCostMetric
 from curobo.rollout.dynamics_model.integration_utils import (
     action_interpolate_kernel,
     interpolate_kernel,
@@ -39,7 +40,8 @@ from curobo.types.base import TensorDeviceType
 from curobo.types.robot import JointState, RobotConfig
 from curobo.types.tensor import T_BDOF, T_DOF, T_BValue_bool, T_BValue_float
 from curobo.util.helpers import list_idx_if_not_none
-from curobo.util.logger import log_info, log_warn
+from curobo.util.logger import log_error, log_info, log_warn
+from curobo.util.torch_utils import get_torch_jit_decorator, is_torch_compile_available
 from curobo.util.trajectory import (
     InterpolateType,
     calculate_dt_no_clamp,
@@ -78,6 +80,7 @@ class TrajOptSolverConfig:
     trim_steps: Optional[List[int]] = None
     store_debug_in_result: bool = False
     optimize_dt: bool = True
+    use_cuda_graph: bool = True
 
     @staticmethod
     @profiler.record_function("trajopt_config/load_from_robot_config")
@@ -98,14 +101,14 @@ class TrajOptSolverConfig:
         interpolation_type: InterpolateType = InterpolateType.LINEAR_CUDA,
         interpolation_steps: int = 10000,
         interpolation_dt: float = 0.01,
-        use_cuda_graph: Optional[bool] = None,
+        use_cuda_graph: bool = True,
         self_collision_check: bool = False,
         self_collision_opt: bool = True,
         grad_trajopt_iters: Optional[int] = None,
         num_seeds: int = 2,
         seed_ratio: Dict[str, int] = {"linear": 1.0, "bias": 0.0, "start": 0.0, "end": 0.0},
         use_particle_opt: bool = True,
-        collision_checker_type: Optional[CollisionCheckerType] = CollisionCheckerType.PRIMITIVE,
+        collision_checker_type: Optional[CollisionCheckerType] = CollisionCheckerType.MESH,
         traj_evaluator_config: TrajEvaluatorConfig = TrajEvaluatorConfig(),
         traj_evaluator: Optional[TrajEvaluator] = None,
         minimize_jerk: bool = True,
@@ -128,6 +131,7 @@ class TrajOptSolverConfig:
         state_finite_difference_mode: Optional[str] = None,
         filter_robot_command: bool = False,
         optimize_dt: bool = True,
+        project_pose_to_goal_frame: bool = True,
     ):
         # NOTE: Don't have default optimize_dt, instead read from a configuration file.
         # use default values, disable environment collision checking
@@ -162,6 +166,16 @@ class TrajOptSolverConfig:
 
         if traj_tsteps is None:
             traj_tsteps = grad_config_data["model"]["horizon"]
+
+        base_config_data["cost"]["pose_cfg"]["project_distance"] = project_pose_to_goal_frame
+        base_config_data["convergence"]["pose_cfg"]["project_distance"] = project_pose_to_goal_frame
+        config_data["cost"]["pose_cfg"]["project_distance"] = project_pose_to_goal_frame
+        grad_config_data["cost"]["pose_cfg"]["project_distance"] = project_pose_to_goal_frame
+
+        base_config_data["cost"]["pose_cfg"]["project_distance"] = project_pose_to_goal_frame
+        base_config_data["convergence"]["pose_cfg"]["project_distance"] = project_pose_to_goal_frame
+        config_data["cost"]["pose_cfg"]["project_distance"] = project_pose_to_goal_frame
+        grad_config_data["cost"]["pose_cfg"]["project_distance"] = project_pose_to_goal_frame
 
         config_data["model"]["horizon"] = traj_tsteps
         grad_config_data["model"]["horizon"] = traj_tsteps
@@ -212,8 +226,8 @@ class TrajOptSolverConfig:
         if not self_collision_opt:
             config_data["cost"]["self_collision_cfg"]["weight"] = 0.0
             grad_config_data["cost"]["self_collision_cfg"]["weight"] = 0.0
-        config_data["mppi"]["n_envs"] = 1
-        grad_config_data["lbfgs"]["n_envs"] = 1
+        config_data["mppi"]["n_problems"] = 1
+        grad_config_data["lbfgs"]["n_problems"] = 1
 
         if fixed_iters is not None:
             grad_config_data["lbfgs"]["fixed_iters"] = fixed_iters
@@ -256,9 +270,10 @@ class TrajOptSolverConfig:
             world_coll_checker=world_coll_checker,
             tensor_args=tensor_args,
         )
-
+        arm_rollout_mppi = None
         with profiler.record_function("trajopt_config/create_rollouts"):
-            arm_rollout_mppi = ArmReacher(cfg)
+            if use_particle_opt:
+                arm_rollout_mppi = ArmReacher(cfg)
             arm_rollout_grad = ArmReacher(grad_cfg)
 
             arm_rollout_safety = ArmReacher(safety_cfg)
@@ -266,20 +281,22 @@ class TrajOptSolverConfig:
                 aux_rollout = ArmReacher(safety_cfg)
             interpolate_rollout = ArmReacher(safety_cfg)
         if trajopt_dt is not None:
-            arm_rollout_mppi.update_traj_dt(dt=trajopt_dt)
+            if arm_rollout_mppi is not None:
+                arm_rollout_mppi.update_traj_dt(dt=trajopt_dt)
             aux_rollout.update_traj_dt(dt=trajopt_dt)
             arm_rollout_grad.update_traj_dt(dt=trajopt_dt)
             arm_rollout_safety.update_traj_dt(dt=trajopt_dt)
-
-        config_dict = ParallelMPPIConfig.create_data_dict(
-            config_data["mppi"], arm_rollout_mppi, tensor_args
-        )
+        if arm_rollout_mppi is not None:
+            config_dict = ParallelMPPIConfig.create_data_dict(
+                config_data["mppi"], arm_rollout_mppi, tensor_args
+            )
+        parallel_mppi = None
         if use_es is not None and use_es:
             mppi_cfg = ParallelESConfig(**config_dict)
             if es_learning_rate is not None:
                 mppi_cfg.learning_rate = es_learning_rate
             parallel_mppi = ParallelES(mppi_cfg)
-        else:
+        elif use_particle_opt:
             mppi_cfg = ParallelMPPIConfig(**config_dict)
             parallel_mppi = ParallelMPPI(mppi_cfg)
 
@@ -307,7 +324,7 @@ class TrajOptSolverConfig:
         cfg = WrapConfig(
             safety_rollout=arm_rollout_safety,
             optimizers=opt_list,
-            compute_metrics=not evaluate_interpolated_trajectory,
+            compute_metrics=True,  # not evaluate_interpolated_trajectory,
             use_cuda_graph_metrics=grad_config_data["lbfgs"]["use_cuda_graph"],
             sync_cuda_time=sync_cuda_time,
         )
@@ -337,6 +354,7 @@ class TrajOptSolverConfig:
             trim_steps=trim_steps,
             store_debug_in_result=store_debug_in_result,
             optimize_dt=optimize_dt,
+            use_cuda_graph=use_cuda_graph,
         )
         return trajopt_cfg
 
@@ -360,6 +378,7 @@ class TrajResult(Sequence):
     optimized_dt: Optional[torch.Tensor] = None
     raw_solution: Optional[JointState] = None
     raw_action: Optional[torch.Tensor] = None
+    goalset_index: Optional[torch.Tensor] = None
 
     def __getitem__(self, idx):
         # position_error = rotation_error = cspace_error = path_buffer_last_tstep = None
@@ -372,6 +391,7 @@ class TrajResult(Sequence):
             self.position_error,
             self.rotation_error,
             self.cspace_error,
+            self.goalset_index,
         ]
         idx_vals = list_idx_if_not_none(d_list, idx)
 
@@ -388,6 +408,7 @@ class TrajResult(Sequence):
             position_error=idx_vals[3],
             rotation_error=idx_vals[4],
             cspace_error=idx_vals[5],
+            goalset_index=idx_vals[6],
         )
 
     def __len__(self):
@@ -405,7 +426,7 @@ class TrajOptSolver(TrajOptSolverConfig):
             3, int(self.action_horizon / 2), self.tensor_args
         ).unsqueeze(0)
         assert self.action_horizon / 2 != 0.0
-        self.solver.update_nenvs(self.num_seeds)
+        self.solver.update_nproblems(self.num_seeds)
         self._max_joint_vel = (
             self.solver.safety_rollout.state_bounds.velocity.view(2, self.dof)[1, :].reshape(
                 1, 1, self.dof
@@ -469,12 +490,18 @@ class TrajOptSolver(TrajOptSolverConfig):
             self._goal_buffer,
             self.tensor_args,
         )
+
         if update_reference:
-            self.solver.update_nenvs(self._solve_state.get_batch_size())
-            self.reset_cuda_graph()
+            if self.use_cuda_graph and self._col is not None:
+                log_error("changing goal type, breaking previous cuda graph.")
+                self.reset_cuda_graph()
+
+            self.solver.update_nproblems(self._solve_state.get_batch_size())
             self._col = torch.arange(
                 0, goal.batch, device=self.tensor_args.device, dtype=torch.long
             )
+            self.reset_shape()
+
         return self._goal_buffer
 
     def solve_any(
@@ -586,6 +613,8 @@ class TrajOptSolver(TrajOptSolverConfig):
             num_seeds,
             solve_state.batch_mode,
         )
+        if traj_result.goalset_index is not None:
+            traj_result.goalset_index[traj_result.goalset_index >= goal.goal_pose.n_goalset] = 0
         if newton_iters is not None:
             self.solver.newton_optimizer.outer_iters = self._og_newton_iters
             self.solver.newton_optimizer.fixed_iters = self._og_newton_fixed_iters
@@ -839,32 +868,47 @@ class TrajOptSolver(TrajOptSolverConfig):
         if self.evaluate_interpolated_trajectory:
             with profiler.record_function("trajopt/evaluate_interpolated"):
                 if self.use_cuda_graph_metrics:
-                    result.metrics = self.interpolate_rollout.get_metrics_cuda_graph(
-                        interpolated_trajs
-                    )
+                    metrics = self.interpolate_rollout.get_metrics_cuda_graph(interpolated_trajs)
                 else:
-                    result.metrics = self.interpolate_rollout.get_metrics(interpolated_trajs)
+                    metrics = self.interpolate_rollout.get_metrics(interpolated_trajs)
+                result.metrics.feasible = metrics.feasible
+                result.metrics.position_error = metrics.position_error
+                result.metrics.rotation_error = metrics.rotation_error
+                result.metrics.cspace_error = metrics.cspace_error
+                result.metrics.goalset_index = metrics.goalset_index
 
         st_time = time.time()
-        feasible = torch.all(result.metrics.feasible, dim=-1)
-        # if self.num_seeds == 1:
-        # print(result.metrics)
-        if result.metrics.position_error is not None:
-            converge = torch.logical_and(
-                result.metrics.position_error[..., -1] <= self.position_threshold,
-                result.metrics.rotation_error[..., -1] <= self.rotation_threshold,
-            )
-        elif result.metrics.cspace_error is not None:
-            converge = result.metrics.cspace_error[..., -1] <= self.cspace_threshold
-        else:
-            raise ValueError("convergence check requires either goal_pose or goal_state")
+        if result.metrics.cspace_error is None and result.metrics.position_error is None:
+            raise log_error("convergence check requires either goal_pose or goal_state")
 
-        success = torch.logical_and(feasible, converge)
+        success = jit_feasible_success(
+            result.metrics.feasible,
+            result.metrics.position_error,
+            result.metrics.rotation_error,
+            result.metrics.cspace_error,
+            self.position_threshold,
+            self.rotation_threshold,
+            self.cspace_threshold,
+        )
+        if False:
+            feasible = torch.all(result.metrics.feasible, dim=-1)
+
+            if result.metrics.position_error is not None:
+                converge = torch.logical_and(
+                    result.metrics.position_error[..., -1] <= self.position_threshold,
+                    result.metrics.rotation_error[..., -1] <= self.rotation_threshold,
+                )
+            elif result.metrics.cspace_error is not None:
+                converge = result.metrics.cspace_error[..., -1] <= self.cspace_threshold
+            else:
+                raise ValueError("convergence check requires either goal_pose or goal_state")
+
+            success = torch.logical_and(feasible, converge)
         if return_all_solutions:
             traj_result = TrajResult(
                 success=success,
                 goal=goal,
-                solution=result.action.scale(self.solver_dt / opt_dt.view(-1, 1, 1)),
+                solution=result.action.scale_by_dt(self.solver_dt_tensor, opt_dt.view(-1, 1, 1)),
                 seed=seed_traj,
                 position_error=result.metrics.position_error,
                 rotation_error=result.metrics.rotation_error,
@@ -877,10 +921,10 @@ class TrajOptSolver(TrajOptSolverConfig):
                 optimized_dt=opt_dt,
                 raw_solution=result.action,
                 raw_action=result.raw_action,
+                goalset_index=result.metrics.goalset_index,
             )
         else:
             # get path length:
-            # max_vel =
             if self.evaluate_interpolated_trajectory:
                 smooth_label, smooth_cost = self.traj_evaluator.evaluate_interpolated_smootheness(
                     interpolated_trajs,
@@ -896,48 +940,88 @@ class TrajOptSolver(TrajOptSolverConfig):
                     self.solver.rollout_fn.dynamics_model.cspace_distance_weight,
                     self._velocity_bounds,
                 )
-            # print(smooth_label, success, self._velocity_bounds.shape, self.solver.rollout_fn.dynamics_model.cspace_distance_weight)
 
             with profiler.record_function("trajopt/best_select"):
-                success[~smooth_label] = False
-                # get the best solution:
-                if result.metrics.pose_error is not None:
-                    convergence_error = result.metrics.pose_error[..., -1]
-                elif result.metrics.cspace_error is not None:
-                    convergence_error = result.metrics.cspace_error[..., -1]
-                else:
-                    raise ValueError("convergence check requires either goal_pose or goal_state")
-                error = convergence_error + smooth_cost
-                error[~success] += 10000.0
-                if batch_mode:
-                    idx = torch.argmin(error.view(goal.batch, num_seeds), dim=-1)
-                    idx = idx + num_seeds * self._col
-                    last_tstep = [last_tstep[i] for i in idx]
-                    success = success[idx]
-                else:
-                    idx = torch.argmin(error, dim=0)
+                if True:  # not get_torch_jit_decorator() == torch.jit.script:
+                    # This only works if torch compile is available:
+                    (
+                        idx,
+                        position_error,
+                        rotation_error,
+                        cspace_error,
+                        goalset_index,
+                        opt_dt,
+                        success,
+                    ) = jit_trajopt_best_select(
+                        success,
+                        smooth_label,
+                        result.metrics.cspace_error,
+                        result.metrics.pose_error,
+                        result.metrics.position_error,
+                        result.metrics.rotation_error,
+                        result.metrics.goalset_index,
+                        result.metrics.cost,
+                        smooth_cost,
+                        batch_mode,
+                        goal.batch,
+                        num_seeds,
+                        self._col,
+                        opt_dt,
+                    )
+                    if batch_mode:
+                        last_tstep = [last_tstep[i] for i in idx]
+                    else:
+                        last_tstep = [last_tstep[idx.item()]]
+                    best_act_seq = result.action[idx]
+                    best_raw_action = result.raw_action[idx]
+                    interpolated_traj = interpolated_trajs[idx]
 
-                    last_tstep = [last_tstep[idx.item()]]
-                    success = success[idx : idx + 1]
+                else:
+                    success[~smooth_label] = False
+                    # get the best solution:
+                    if result.metrics.pose_error is not None:
+                        convergence_error = result.metrics.pose_error[..., -1]
+                    elif result.metrics.cspace_error is not None:
+                        convergence_error = result.metrics.cspace_error[..., -1]
+                    else:
+                        raise ValueError(
+                            "convergence check requires either goal_pose or goal_state"
+                        )
+                    running_cost = torch.mean(result.metrics.cost, dim=-1) * 0.0001
+                    error = convergence_error + smooth_cost + running_cost
+                    error[~success] += 10000.0
+                    if batch_mode:
+                        idx = torch.argmin(error.view(goal.batch, num_seeds), dim=-1)
+                        idx = idx + num_seeds * self._col
+                        last_tstep = [last_tstep[i] for i in idx]
+                        success = success[idx]
+                    else:
+                        idx = torch.argmin(error, dim=0)
 
-                best_act_seq = result.action[idx]
-                best_raw_action = result.raw_action[idx]
-                interpolated_traj = interpolated_trajs[idx]
-                position_error = rotation_error = cspace_error = None
-                if result.metrics.position_error is not None:
-                    position_error = result.metrics.position_error[idx, -1]
-                if result.metrics.rotation_error is not None:
-                    rotation_error = result.metrics.rotation_error[idx, -1]
-                if result.metrics.cspace_error is not None:
-                    cspace_error = result.metrics.cspace_error[idx, -1]
-                opt_dt = opt_dt[idx]
+                        last_tstep = [last_tstep[idx.item()]]
+                        success = success[idx : idx + 1]
+
+                    best_act_seq = result.action[idx]
+                    best_raw_action = result.raw_action[idx]
+                    interpolated_traj = interpolated_trajs[idx]
+                    goalset_index = position_error = rotation_error = cspace_error = None
+                    if result.metrics.position_error is not None:
+                        position_error = result.metrics.position_error[idx, -1]
+                    if result.metrics.rotation_error is not None:
+                        rotation_error = result.metrics.rotation_error[idx, -1]
+                    if result.metrics.cspace_error is not None:
+                        cspace_error = result.metrics.cspace_error[idx, -1]
+                    if result.metrics.goalset_index is not None:
+                        goalset_index = result.metrics.goalset_index[idx, -1]
+
+                    opt_dt = opt_dt[idx]
             if self.sync_cuda_time:
                 torch.cuda.synchronize()
             if len(best_act_seq.shape) == 3:
                 opt_dt_v = opt_dt.view(-1, 1, 1)
             else:
                 opt_dt_v = opt_dt.view(1, 1)
-            opt_solution = best_act_seq.scale(self.solver_dt / opt_dt_v)
+            opt_solution = best_act_seq.scale_by_dt(self.solver_dt_tensor, opt_dt_v)
             select_time = time.time() - st_time
             debug_info = None
             if self.store_debug_in_result:
@@ -965,6 +1049,7 @@ class TrajOptSolver(TrajOptSolverConfig):
                 optimized_dt=opt_dt,
                 raw_solution=best_act_seq,
                 raw_action=best_raw_action,
+                goalset_index=goalset_index,
             )
         return traj_result
 
@@ -999,7 +1084,6 @@ class TrajOptSolver(TrajOptSolverConfig):
             return self.solve_batch_goalset(
                 goal, seed_traj, use_nn_seed, return_all_solutions, num_seeds, seed_success
             )
-        return traj_result
 
     def get_linear_seed(self, start_state, goal_state):
         start_q = start_state.position.view(-1, 1, self.dof)
@@ -1141,7 +1225,7 @@ class TrajOptSolver(TrajOptSolverConfig):
             self._max_joint_vel,
             self._max_joint_acc,
             self._max_joint_jerk,
-            self.solver_dt,
+            self.solver_dt_tensor,
             kind=self.interpolation_type,
             tensor_args=self.tensor_args,
             out_traj_state=self._interpolated_traj_buffer,
@@ -1173,6 +1257,11 @@ class TrajOptSolver(TrajOptSolverConfig):
         self.interpolate_rollout.reset_cuda_graph()
         self.rollout_fn.reset_cuda_graph()
 
+    def reset_shape(self):
+        self.solver.reset_shape()
+        self.interpolate_rollout.reset_shape()
+        self.rollout_fn.reset_shape()
+
     @property
     def kinematics(self) -> CudaRobotModel:
         return self.rollout_fn.dynamics_model.robot_model
@@ -1186,7 +1275,12 @@ class TrajOptSolver(TrajOptSolverConfig):
 
     @property
     def solver_dt(self):
-        return self.solver.safety_rollout.dynamics_model.dt_traj_params.base_dt
+        return self.solver.safety_rollout.dynamics_model.traj_dt[0]
+        # return self.solver.safety_rollout.dynamics_model.dt_traj_params.base_dt
+
+    @property
+    def solver_dt_tensor(self):
+        return self.solver.safety_rollout.dynamics_model.traj_dt[0]
 
     def update_solver_dt(
         self,
@@ -1205,3 +1299,90 @@ class TrajOptSolver(TrajOptSolverConfig):
 
     def get_full_js(self, active_js: JointState) -> JointState:
         return self.rollout_fn.get_full_dof_from_solution(active_js)
+
+    def update_pose_cost_metric(
+        self,
+        metric: PoseCostMetric,
+    ):
+        rollouts = self.get_all_rollout_instances()
+        [
+            rollout.update_pose_cost_metric(metric)
+            for rollout in rollouts
+            if isinstance(rollout, ArmReacher)
+        ]
+
+
+@get_torch_jit_decorator()
+def jit_feasible_success(
+    feasible,
+    position_error: Union[torch.Tensor, None],
+    rotation_error: Union[torch.Tensor, None],
+    cspace_error: Union[torch.Tensor, None],
+    position_threshold: float,
+    rotation_threshold: float,
+    cspace_threshold: float,
+):
+    feasible = torch.all(feasible, dim=-1)
+    converge = feasible
+    if position_error is not None and rotation_error is not None:
+        converge = torch.logical_and(
+            position_error[..., -1] <= position_threshold,
+            rotation_error[..., -1] <= rotation_threshold,
+        )
+    elif cspace_error is not None:
+        converge = cspace_error[..., -1] <= cspace_threshold
+
+    success = torch.logical_and(feasible, converge)
+    return success
+
+
+@get_torch_jit_decorator(only_valid_for_compile=True)
+def jit_trajopt_best_select(
+    success,
+    smooth_label,
+    cspace_error: Union[torch.Tensor, None],
+    pose_error: Union[torch.Tensor, None],
+    position_error: Union[torch.Tensor, None],
+    rotation_error: Union[torch.Tensor, None],
+    goalset_index: Union[torch.Tensor, None],
+    cost,
+    smooth_cost,
+    batch_mode: bool,
+    batch: int,
+    num_seeds: int,
+    col,
+    opt_dt,
+):
+    success[~smooth_label] = False
+    convergence_error = 0
+    # get the best solution:
+    if pose_error is not None:
+        convergence_error = pose_error[..., -1]
+    elif cspace_error is not None:
+        convergence_error = cspace_error[..., -1]
+
+    running_cost = torch.mean(cost, dim=-1) * 0.0001
+    error = convergence_error + smooth_cost + running_cost
+    error[~success] += 10000.0
+    if batch_mode:
+        idx = torch.argmin(error.view(batch, num_seeds), dim=-1)
+        idx = idx + num_seeds * col
+        success = success[idx]
+    else:
+        idx = torch.argmin(error, dim=0)
+
+        success = success[idx : idx + 1]
+
+    # goalset_index = position_error = rotation_error = cspace_error = None
+    if position_error is not None:
+        position_error = position_error[idx, -1]
+    if rotation_error is not None:
+        rotation_error = rotation_error[idx, -1]
+    if cspace_error is not None:
+        cspace_error = cspace_error[idx, -1]
+    if goalset_index is not None:
+        goalset_index = goalset_index[idx, -1]
+
+    opt_dt = opt_dt[idx]
+
+    return idx, position_error, rotation_error, cspace_error, goalset_index, opt_dt, success

@@ -44,7 +44,6 @@ cuRobo performs trajectory optimization across many seeds in parallel to find a 
 ```
 cd ~/
 git clone git@github.com:makolon/curobo.git
-
 ```
 2. Build docker
 ```
@@ -60,7 +59,7 @@ cd ~/curobo
 
 > [!NOTE]
 > In the current version, it is necessary to execute the following command to reflect the changes made to curobot in the source code.
-> `cd ~/curobot && omni_python -m pip install .[dev] --no-build-isolation`
+> `cd ~/curobo && omni_python -m pip install .[dev] --no-build-isolation`
 > It takes about 10 minutes. 
 
 ### Run demo

@@ -9,12 +9,101 @@ without an express license agreement from NVIDIA CORPORATION or
 its affiliates is strictly prohibited.
 -->
 # Changelog
-## Latest Commit
-### BugFixes
-- refactored wp.index() instances to `[]` to avoid errors in using with warp-lang>=0.11.
-- Fixed bug in gaussian transformation to ensure values are not -1 or +1.
+
+## Version 0.7.0
+### Changes in default behavior
+- Increased default collision cache to 50 in RobotWorld.
+- Changed `CSpaceConfig.position_limit_clip` default to 0 as previous default of 0.01 can make 
+default start state in examples be out of bounds. 
+- MotionGen uses parallel_finetune by default. To get previous motion gen behavior, pass 
+`warmup(parallel_finetune=False)` and `MotionGenPlanConfig(parallel_finetune=False)`.
+- MotionGen loads Mesh Collision checker instead of Primitive by default.
+- UR10e and UR5e now don't have a collision sphere at tool frame for world collision checking. This 
+sphere is only active for self collision avoidance.
+- With torch>=2.0, cuRobo will use `torch.compile` instead of `torch.jit.script` to generate fused 
+kernels. This can take several seconds during the first run. To enable this feature, set 
+environment variable `export CUROBO_TORCH_COMPILE_DISABLE=0`.
+
+### Breaking Changes
+- Renamed `copy_if_not_none` to `clone_if_not_none` to be more descriptive. Now `copy_if_not_none`
+will try to copy data into reference.
+- Renamed `n_envs` in curobo.opt module to avoid confusion between parallel environments and 
+parallel problems in optimization.
+- Added more inputs to pose distance kernels. Check `curobolib/geom.py`.
+- Pose cost `run_vec_weight` should now be `[0,0,0,0,0,0]` instead of `[1,1,1,1,1,1]`
+- ``max_distance`` is now tensor from ``float`` and is an input to collision kernels.
+- Order of inputs to ``SweptSdfMeshWarpPy`` has changed. 
+
+
+### New Features
+- Add function to disable and enable collision for specific links in KinematicsTensorConfig. 
+- Add goal index to reacher results to return index of goal reached when goalset planning.
+- Add locked joint state update api in MotionGen class.
+- Add goalset warmup padding to handle varied number of goals during goalset planning and also when
+calling plan_single after warmup of goalset. 
+- Add new trajopt config to allow for smooth solutions at slow speeds (`velocity_scale<=0.25`). Also
+add error when `velocity_scale<0.1`.
+- Add experimental robot image segmentation module to enable robot removal in depth images.
+- Add constrained planning mode to motion_gen.
+- Use `torch.compile` to leverage better kernel fusion in place of `torch.jit.script`. 
+- Significantly improved collision computation for cuboids and meshes. Mesh collision checker is 
+now only 2x slower than cuboid (from 5x slower). Optimization convergence is also improved. 
+- LBFGS kernels now support ``history <= 31`` from ``history <= 15``.
+- 2x faster LBFGS kernel that allocates upto 68kb of shared memory, preventing use in CUDA devices 
+with compute capability ``<7.0``.
+- On benchmarking Dataset, Planning time is now 42ms on average from 50ms. Higher quality solutions 
+are also obtained. See [benchmarks](https://curobo.org/source/getting_started/4_benchmarks.html) for more details.
+- Add ``WorldCollisionVoxel``, a new collision checking implementation that uses a voxel grid 
+of signed distances (SDF) to compute collision avoidance metrics. Documentation coming soon, see
+``benchmark/curobo_voxel_benchmark.py`` for an example.
+- Add API for ESDF computation from world representations, see 
+``WorldCollision.get_esdf_in_bounding_box()``.
+- Add partial support for isaac sim 2023.1.1. Most examples run for UR robots. `Franka Panda` is 
+unstable.
+
+### BugFixes & Misc.
+- refactored wp.index() instances to `[]` to avoid errors in future releases of warp.
+- Fix bug in gaussian transformation to ensure values are not -1 or +1.
+- Fix bug in ik_solver loading ee_link_name from argument.
+- Fix bug in batch_goalset planning, where pose cost was selected as GOALSET instead of 
+BATCH_GOALSET.
+- Added package data to also export `.so` files.
 - Fixed bug in transforming link visual mesh offset when reading from urdf. 
 - Fixed bug in MotionGenPlanConfig.clone() that didn't clone the state of parallel_finetune.
+- Increased weighting from 1.0 to 10.0 for optimized_dt in TrajEvaluator to select shorter 
+trajectories.
+- Improved determinism by setting global seed for random in `graph_nx.py`.
+- Added option to clear obstacles in WorldPrimitiveCollision.
+- Raise error when reference of tensors change in MotionGen, IKSolver, and TrajOpt when cuda graph
+is enabled.
+- plan_single will get converted to plan_goalset when a plan_goalset was used to initialize cuda 
+graph.
+- plan_goalset will pad for extra goals when called with less number of goal than initial creation.
+- Improved API documentation for Optimizer class.
+- Set `use_cuda_graph` to `True` as default from `None` in `MotionGenConfig.load_from_robot_config`
+- Add batched mode to robot image segmentation, supports single robot multiple camera and batch 
+robot batch camera. 
+- Add `log_warn` import to `arm_reacher.py`
+- Remove negative radius check in self collision kernel to allow for self collision checking with
+spheres of negative radius.
+- Added `conftest.py` to disable `torch.compile` for tests.
+- Added UR5e robot with robotiq gripper (2f-140) with improved sphere model.
+- Fix bug in aarch64.dockerfile where curobo was cloned to wrong path.
+- Fix bug in aarch64.dockerfile where python was used instead of python3.
+- Remove unused variables in kernels. 
+- Added ``pybind11`` as a dependency as some pytorch dockers for Jetson do not have this installed.
+- Fix incorrect dimensions in ``MotionGenResult.success`` in ``MotionGen.plan_batch()`` when 
+trajectory optimization fails.
+- Added unit tests for collision checking functions.
+- Fix bug in linear interpolation which was not reading the new ``optimized_dt`` to interpolate
+velocity, acceleration, and jerk.
+- Remove torch.jit.script wrapper for lbfgs as it causes TorchScript error if history is different
+between trajopt and finetune_trajopt.
+
+
+### Known Bugs (WIP)
+- `Franka Panda` robot loading from urdf in isaac sim 2023.1.1 is unstable. 
+
 ## Version 0.6.2
 ### New Features
 - Added support for actuated axis to be negative (i.e., urdf joints with `<axis xyz="0 -1 0"/>` are
@@ -35,6 +124,7 @@ Run `benchmark/ik_benchmark.py` to get the latest results.
 - Added `external_asset_path` to robot configuration to help in loading urdf and meshes from an 
 external directory.
 
+
 ### BugFixes & Misc.
 - Update nvblox wrappers to work with v0.0.5 without segfaults. Significantly improves stability.
 - Remove mimic joints in franka panda to maintain compatibility with Isaac Sim 2023.1.0 and 2022.2.1
@@ -53,12 +143,13 @@ fails.
 
 ### Performance Regressions
 - cuRobo now generates significantly shorter paths then previous version. E.g., cuRobo obtains
-2.2 seconds 98th percentile motion time on the 2600 problems (`benchmark/curobo_benchmark.py`), where
-previously it was at 3 seconds (1.36x quicker motions). This was obtained by retuning the weights and
-slight reformulations of trajectory optimization. These changes have led to a slight degrade in 
-planning time, 20ms slower on 4090 and 40ms on ORIN MAXN. We will address this slow down in a later
-release. One way to avoid this regression is to set `finetune_dt_scale=1.05` in 
+2.2 seconds 98th percentile motion time on the 2600 problems (`benchmark/curobo_benchmark.py`), 
+where previously it was at 3 seconds (1.36x quicker motions). This was obtained by retuning the 
+weights and slight reformulations of trajectory optimization. These changes have led to a slight 
+degrade in planning time, 20ms slower on 4090 and 40ms on ORIN MAXN. We will address this slow down
+in a later release. One way to avoid this regression is to set `finetune_dt_scale=1.05` in 
 `MotionGenConfig.load_from_robot_config()`.
+
 
 ## Version 0.6.1
 

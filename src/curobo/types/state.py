@@ -25,11 +25,12 @@ from curobo.types.tensor import T_BDOF, T_DOF
 from curobo.util.logger import log_error, log_info, log_warn
 from curobo.util.tensor_util import (
     check_tensor_shapes,
-    copy_if_not_none,
+    clone_if_not_none,
     copy_tensor,
     fd_tensor,
     tensor_repeat_seeds,
 )
+from curobo.util.torch_utils import get_torch_jit_decorator
 
 
 @dataclass
@@ -121,12 +122,14 @@ class JointState(State):
     def repeat_seeds(self, num_seeds: int):
         return JointState(
             position=tensor_repeat_seeds(self.position, num_seeds),
-            velocity=tensor_repeat_seeds(self.velocity, num_seeds)
-            if self.velocity is not None
-            else None,
-            acceleration=tensor_repeat_seeds(self.acceleration, num_seeds)
-            if self.acceleration is not None
-            else None,
+            velocity=(
+                tensor_repeat_seeds(self.velocity, num_seeds) if self.velocity is not None else None
+            ),
+            acceleration=(
+                tensor_repeat_seeds(self.acceleration, num_seeds)
+                if self.acceleration is not None
+                else None
+            ),
             joint_names=self.joint_names,
         )
 
@@ -153,10 +156,10 @@ class JointState(State):
         if self.joint_names is not None:
             j_names = self.joint_names.copy()
         return JointState(
-            position=copy_if_not_none(self.position),
-            velocity=copy_if_not_none(self.velocity),
-            acceleration=copy_if_not_none(self.acceleration),
-            jerk=copy_if_not_none(self.jerk),
+            position=clone_if_not_none(self.position),
+            velocity=clone_if_not_none(self.velocity),
+            acceleration=clone_if_not_none(self.acceleration),
+            jerk=clone_if_not_none(self.jerk),
             joint_names=j_names,
             tensor_args=self.tensor_args,
         )
@@ -209,10 +212,10 @@ class JointState(State):
         j = None
         v = a = None
         max_idx = 0
+        if isinstance(idx, List):
+            idx = torch.as_tensor(idx, device=self.position.device, dtype=torch.long)
         if isinstance(idx, int):
             max_idx = idx
-        elif isinstance(idx, List):
-            max_idx = max(idx)
         elif isinstance(idx, torch.Tensor):
             max_idx = torch.max(idx)
         if max_idx >= self.position.shape[0]:
@@ -221,31 +224,19 @@ class JointState(State):
                 + " index out of range, current state is of length "
                 + str(self.position.shape)
             )
-        p = self.position[idx]
-        if self.velocity is not None:
-            if max_idx >= self.velocity.shape[0]:
-                raise ValueError(
-                    str(max_idx)
-                    + " index out of range, current velocity is of length "
-                    + str(self.velocity.shape)
-                )
-            v = self.velocity[idx]
-        if self.acceleration is not None:
-            if max_idx >= self.acceleration.shape[0]:
-                raise ValueError(
-                    str(max_idx)
-                    + " index out of range, current acceleration is of length "
-                    + str(self.acceleration.shape)
-                )
-            a = self.acceleration[idx]
-        if self.jerk is not None:
-            if max_idx >= self.jerk.shape[0]:
-                raise ValueError(
-                    str(max_idx)
-                    + " index out of range, current jerk is of length "
-                    + str(self.jerk.shape)
-                )
-            j = self.jerk[idx]
+        if isinstance(idx, int):
+            p, v, a, j = jit_get_index_int(
+                self.position, self.velocity, self.acceleration, self.jerk, idx
+            )
+        elif isinstance(idx, torch.Tensor):
+            p, v, a, j = jit_get_index(
+                self.position, self.velocity, self.acceleration, self.jerk, idx
+            )
+        else:
+            p, v, a, j = fn_get_index(
+                self.position, self.velocity, self.acceleration, self.jerk, idx
+            )
+
         return JointState(p, v, a, joint_names=self.joint_names, jerk=j)
 
     def __len__(self):
@@ -512,6 +503,88 @@ class JointState(State):
             jerk = self.jerk * (dt**3)
         return JointState(self.position, vel, acc, self.joint_names, jerk, self.tensor_args)
 
+    def scale_by_dt(self, dt: torch.Tensor, new_dt: torch.Tensor):
+        vel, acc, jerk = jit_js_scale(self.velocity, self.acceleration, self.jerk, dt, new_dt)
+
+        return JointState(self.position, vel, acc, self.joint_names, jerk, self.tensor_args)
+
     @property
     def shape(self):
         return self.position.shape
+
+
+@get_torch_jit_decorator()
+def jit_js_scale(
+    vel: Union[None, torch.Tensor],
+    acc: Union[None, torch.Tensor],
+    jerk: Union[None, torch.Tensor],
+    dt: torch.Tensor,
+    new_dt: torch.Tensor,
+):
+    scale_dt = dt / new_dt
+    if vel is not None:
+        vel = vel * scale_dt
+    if acc is not None:
+        acc = acc * scale_dt * scale_dt
+    if jerk is not None:
+        jerk = jerk * scale_dt * scale_dt * scale_dt
+    return vel, acc, jerk
+
+
+@get_torch_jit_decorator()
+def jit_get_index(
+    position: torch.Tensor,
+    velocity: Union[torch.Tensor, None],
+    acc: Union[torch.Tensor, None],
+    jerk: Union[torch.Tensor, None],
+    idx: torch.Tensor,
+):
+
+    position = position[idx]
+    if velocity is not None:
+        velocity = velocity[idx]
+    if acc is not None:
+        acc = acc[idx]
+    if jerk is not None:
+        jerk = jerk[idx]
+
+    return position, velocity, acc, jerk
+
+
+def fn_get_index(
+    position: torch.Tensor,
+    velocity: Union[torch.Tensor, None],
+    acc: Union[torch.Tensor, None],
+    jerk: Union[torch.Tensor, None],
+    idx: torch.Tensor,
+):
+
+    position = position[idx]
+    if velocity is not None:
+        velocity = velocity[idx]
+    if acc is not None:
+        acc = acc[idx]
+    if jerk is not None:
+        jerk = jerk[idx]
+
+    return position, velocity, acc, jerk
+
+
+@get_torch_jit_decorator()
+def jit_get_index_int(
+    position: torch.Tensor,
+    velocity: Union[torch.Tensor, None],
+    acc: Union[torch.Tensor, None],
+    jerk: Union[torch.Tensor, None],
+    idx: int,
+):
+
+    position = position[idx]
+    if velocity is not None:
+        velocity = velocity[idx]
+    if acc is not None:
+        acc = acc[idx]
+    if jerk is not None:
+        jerk = jerk[idx]
+
+    return position, velocity, acc, jerk

@@ -200,3 +200,4 @@ nvidia_curobo*/
 *tfevents*
 
 *.csv
+docs/*

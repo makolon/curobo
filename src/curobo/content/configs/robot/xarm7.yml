@@ -105,6 +105,10 @@ robot_cfg:
 
     lock_joints: {"left_finger_joint": 0.0, "left_inner_knuckle_joint": 0.0,
       "right_finger_joint": 0.0, "right_inner_knuckle_joint": 0.0}
+    extra_links: {
+      "fingertip_centered": {"parent_link_name": "xarm_gripper_base_link", 
+      "link_name": "fingertip_centered", "fixed_transform": [0,0,0.1455,1,0,0,0], "joint_type": "FIXED",
+      "joint_name": "fingertip_fixed_joint"}}
     cspace:
       joint_names: ['joint1', 'joint2', 'joint3', 'joint4', 'joint5', 'joint6', 'joint7',
         'left_drive_joint', 'right_drive_joint']
