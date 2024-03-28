@@ -43,6 +43,7 @@ robot_cfg:
         "right_outer_knuckle",
         "right_finger",
         "right_inner_knuckle",
+        "fingertip_centered"
       ]
     collision_spheres: "spheres/xarm7_with_gripper.yml"
     collision_sphere_buffer: 0.005
@@ -81,6 +82,7 @@ robot_cfg:
         "right_outer_knuckle": 0.01,
         "right_finger": 0.01,
         "right_inner_knuckle": 0.01,
+        "fingertip_centered": 0.0,
       }
     mesh_link_names:
       [
