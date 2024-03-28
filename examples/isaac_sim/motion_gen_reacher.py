@@ -138,6 +138,7 @@ from curobo.wrap.reacher.motion_gen import (
 
 def main():
     # create a curobo motion gen instance:
+    num_targets = 0
     # assuming obstacles are in objects_path:
     my_world = World(stage_units_in_meters=1.0)
     stage = my_world.stage
@@ -233,6 +234,7 @@ def main():
     motion_gen = MotionGen(motion_gen_config)
     print("warming up...")
     motion_gen.warmup(enable_graph=True, warmup_js_trajopt=False, parallel_finetune=True)
+
     print("Curobo is Ready")
 
     add_extensions(simulation_app, args.headless_mode)
@@ -269,7 +271,6 @@ def main():
             continue
 
         step_index = my_world.current_time_step_index
-
         if articulation_controller is None:
             articulation_controller = robot.get_articulation_controller()
 
