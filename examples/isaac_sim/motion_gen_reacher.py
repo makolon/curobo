@@ -251,9 +251,6 @@ def main():
     usd_help.load_stage(my_world.stage)
     usd_help.add_world_to_stage(world_cfg, base_frame="/World")
 
-    # add ground plane
-    my_world.scene.add_default_ground_plane()
-
     cmd_plan = None
     cmd_idx = 0
     i = 0

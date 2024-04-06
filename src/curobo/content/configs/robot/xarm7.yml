@@ -17,7 +17,6 @@ robot_cfg:
     isaac_usd_path: ""
     usd_flip_joints: {}
     usd_flip_joint_limits: []
-
     urdf_path: "robot/xarm_description/urdf/xarm7.urdf"
     asset_root_path: "robot/xarm_description"
     
@@ -25,7 +24,6 @@ robot_cfg:
     ee_link: "fingertip_centered"
     link_names: null
     lock_joints: null
-
     collision_link_names:
       [
         "link_base",
@@ -37,15 +35,8 @@ robot_cfg:
         "link6",
         "link7",
         "xarm_gripper_base_link",
-        "left_outer_knuckle",
-        "left_finger",
-        "left_inner_knuckle",
-        "right_outer_knuckle",
-        "right_finger",
-        "right_inner_knuckle",
-        "fingertip_centered"
       ]
-    collision_spheres: "spheres/xarm7_with_gripper.yml"
+    collision_spheres: "spheres/xarm7.yml"
     collision_sphere_buffer: 0.005
     extra_collision_spheres: {}
     use_global_cumul: True
@@ -56,14 +47,9 @@ robot_cfg:
         "link2": ["link3", "link4"],
         "link3": ["link4", "link5"],
         "link4": ["link5", "link6", "link7"],
-        "link5": ["link6", "link7", "xarm_gripper_base_link", "left_finger", "right_finger"],
-        "link6": ["link7", "xarm_gripper_base_link", "left_finger", "right_finger"],
-        "link7": ["xarm_gripper_base_link", "left_finger", "right_finger"],
-        "xarm_gripper_base_link": ["left_finger", "right_finger"],
-        "left_outer_knuckle": ["left_finger", "left_inner_knuckle"],
-        "left_finger": ["left_inner_knuckle"],
-        "right_outer_knuckle": ["right_finger", "right_inner_knuckle"],
-        "right_finger": ["right_inner_knuckle"],
+        "link5": ["link6", "link7", "xarm_gripper_base_link"],
+        "link6": ["link7", "xarm_gripper_base_link"],
+        "link7": ["xarm_gripper_base_link"],
       }
     self_collision_buffer:
       {
@@ -76,13 +62,6 @@ robot_cfg:
         "link6": 0.0,
         "link7": 0.0,
         "xarm_gripper_base_link": 0.02,
-        "left_outer_knuckle": 0.01,
-        "left_finger": 0.01,
-        "left_inner_knuckle": 0.01,
-        "right_outer_knuckle": 0.01,
-        "right_finger": 0.01,
-        "right_inner_knuckle": 0.01,
-        "fingertip_centered": 0.0,
       }
     mesh_link_names:
       [
@@ -95,25 +74,16 @@ robot_cfg:
         "link6",
         "link7",
         "xarm_gripper_base_link",
-        "left_outer_knuckle",
-        "left_finger",
-        "left_inner_knuckle",
-        "right_outer_knuckle",
-        "right_finger",
-        "right_inner_knuckle",
       ]
 
-    lock_joints: {"left_finger_joint": 0.0, "left_inner_knuckle_joint": 0.0,
-      "right_finger_joint": 0.0, "right_inner_knuckle_joint": 0.0}
     extra_links: {
       "fingertip_centered": {"parent_link_name": "xarm_gripper_base_link", 
       "link_name": "fingertip_centered", "fixed_transform": [0,0,0.1455,1,0,0,0], "joint_type": "FIXED",
       "joint_name": "fingertip_fixed_joint"}}
     cspace:
-      joint_names: ['joint1', 'joint2', 'joint3', 'joint4', 'joint5', 'joint6', 'joint7',
-        'left_drive_joint', 'right_drive_joint']
-      retract_config: [0.0, -0.698, 0.0, 0.349, 0.0, 1.047,0.0, 0.0, 0.0]
-      null_space_weight: [1,1,1,1,1,1,1,1,1]
-      cspace_distance_weight: [1,1,1,1,1,1,1,1,1]
+      joint_names: ['joint1', 'joint2', 'joint3', 'joint4', 'joint5', 'joint6', 'joint7']
+      retract_config: [0.0, -0.698, 0.0, 0.349, 0.0, 1.047, 0.0]
+      null_space_weight: [1,1,1,1,1,1,1]
+      cspace_distance_weight: [1,1,1,1,1,1,1]
       max_jerk: 500.0
       max_acceleration: 15.0

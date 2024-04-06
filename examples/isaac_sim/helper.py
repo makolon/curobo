@@ -24,60 +24,6 @@ from omni.isaac.core.utils.prims import get_prim_at_path
 from omni.isaac.core.utils.stage import add_reference_to_stage, get_current_stage
 from pxr import UsdPhysics, UsdLux, PhysxSchema
 
-def set_drive_type(prim_path, drive_type):
-    joint_prim = get_prim_at_path(prim_path)
-
-    # set drive type ("angular" or "linear")
-    drive = UsdPhysics.DriveAPI.Apply(joint_prim, drive_type)
-    return drive
-
-def set_drive_target_position(drive, target_value):
-    if not drive.GetTargetPositionAttr():
-        drive.CreateTargetPositionAttr(target_value)
-    else:
-        drive.GetTargetPositionAttr().Set(target_value)
-
-def set_drive_target_velocity(drive, target_value):
-    if not drive.GetTargetVelocityAttr():
-        drive.CreateTargetVelocityAttr(target_value)
-    else:
-        drive.GetTargetVelocityAttr().Set(target_value)
-
-def set_drive_stiffness(drive, stiffness):
-    if not drive.GetStiffnessAttr():
-        drive.CreateStiffnessAttr(stiffness)
-    else:
-        drive.GetStiffnessAttr().Set(stiffness)
-
-def set_drive_damping(drive, damping):
-    if not drive.GetDampingAttr():
-        drive.CreateDampingAttr(damping)
-    else:
-        drive.GetDampingAttr().Set(damping)
-
-def set_drive_max_force(drive, max_force):
-    if not drive.GetMaxForceAttr():
-        drive.CreateMaxForceAttr(max_force)
-    else:
-        drive.GetMaxForceAttr().Set(max_force)
-
-def set_drive(prim_path, drive_type, target_type, target_value, stiffness, damping, max_force) -> None:
-    drive = set_drive_type(prim_path, drive_type)
-
-    # set target type ("position" or "velocity")
-    if target_type == "position":
-        set_drive_target_position(drive, target_value)
-    elif target_type == "velocity":
-        set_drive_target_velocity(drive, target_value)
-
-    set_drive_stiffness(drive, stiffness)
-    set_drive_damping(drive, damping)
-    set_drive_max_force(drive, max_force)
-
-def create_distant_light(prim_path="/World/defaultDistantLight", intensity=5000):
-    stage = get_current_stage()
-    light = UsdLux.DistantLight.Define(stage, prim_path)
-    light.GetPrim().GetAttribute("intensity").Set(intensity)
 
 # CuRobo
 from curobo.util.logger import log_warn
@@ -193,8 +139,17 @@ def add_robot_to_scene(
     position: np.array = np.array([0, 0, 0]),
 ):
     if load_from_usd:
-        robot_path = "/World/xarm7"
-        robot_p = xArm(robot_path, name="xarm7", translation=position)
+        import omni.isaac.core.utils.stage as stage_utils
+        usd_path = "/pkgs/curobo/src/curobo/content/assets/robot/xarm_description/usd/xarm7.usd"
+        robot_path="/World/xarm7"
+
+        # add to stage
+        stage_utils.add_reference_to_stage(usd_path, robot_path)
+
+        robot_p = Robot(
+            prim_path=robot_path,
+            name="xarm7",
+            position=position)
     else:
         urdf_interface = _urdf.acquire_urdf_interface()
 
