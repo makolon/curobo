@@ -10,7 +10,6 @@
 ## its affiliates is strictly prohibited.
 ##
 
-
 # This script will create a dev docker. Run this script by calling `bash build_dev_docker.sh`
 # If you want to build a isaac sim docker, run this script with `bash build_dev_docker.sh isaac`
 
@@ -55,11 +54,11 @@ elif [ "$input_arg" = "aarch64" ]; then
     dockerfile="aarch64.dockerfile"
     image_tag="aarch64"
 else
-    echo "Unknown Argument. Please pass one of [x86, aarch64, isaac_sim_2022.2.1, isaac_sim_2023.1.0]"
+    echo "Unknown Argument. Please pass one of [x86, aarch64, isaac_sim_2022.2.1, isaac_sim_2023.1.0, isaac_sim_2023.1.1]"
     exit
 fi
 
 # build docker file:
 echo "${dockerfile}"
 docker build --no-cache --build-arg ISAAC_SIM_VERSION=${isaac_sim_version} \
-    -t curobo_docker:${image_tag} -f docker/${dockerfile} .
+    -t curobo_docker:${image_tag} -f ${dockerfile} .

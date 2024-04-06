@@ -26,14 +26,13 @@ if [ -z "$input_arg" ]; then
     fi
 fi
 
-
 if [ $input_arg == "x86" ]; then
 
     docker run --rm -it \
     --privileged \
     -e NVIDIA_DISABLE_REQUIRE=1 \
     -e NVIDIA_DRIVER_CAPABILITIES=all  --device /dev/dri \
-    --mount type=bind,src=/home/$USER/code,target=/home/$USER/code \
+    --mount type=bind,src=/home/$USER/Codes,target=/home/$USER/Codes \
     --hostname ros1-docker \
     --add-host ros1-docker:127.0.0.1 \
     --gpus all \
@@ -56,7 +55,7 @@ elif [ $input_arg == "aarch64" ]; then
     --env DISPLAY=$DISPLAY \
     --volume /tmp/.X11-unix:/tmp/.X11-unix \
     --volume /dev/input:/dev/input \
-    --mount type=bind,src=/home/$USER/code,target=/home/$USER/code \
+    --mount type=bind,src=/home/$USER/Codes,target=/home/$USER/Codes \
     curobo_docker:user_$input_arg
 
 elif [[ $input_arg == *isaac_sim* ]] ; then
@@ -70,8 +69,6 @@ elif [[ $input_arg == *isaac_sim* ]] ; then
     ~/docker/isaac-sim/logs \
     ~/docker/isaac-sim/data \
     ~/docker/isaac-sim/documents
- 
-
 
    docker run --name container_$input_arg -it --gpus all -e "ACCEPT_EULA=Y" --rm --network=host \
         --privileged \
@@ -87,9 +84,8 @@ elif [[ $input_arg == *isaac_sim* ]] ; then
         -v ~/docker/isaac-sim/data:/root/.local/share/ov/data:rw \
         -v ~/docker/isaac-sim/documents:/home/$USER/Documents:rw \
         --volume /dev:/dev \
-        --mount type=bind,src=/home/$USER/code,target=/home/$USER/code \
+        --mount type=bind,src=/home/$USER/Codes,target=/home/$USER/Codes \
         curobo_docker:user_$input_arg
-    
 
 else
     echo "Unknown docker"

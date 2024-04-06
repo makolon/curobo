@@ -21,9 +21,7 @@ RUN apt-get update && apt-get install -y \
   && dpkg-reconfigure -f noninteractive tzdata
 
 RUN apt-get update &&\
-    apt-get install -y sudo git bash software-properties-common graphviz &&\
+    apt-get install -y sudo git bash software-properties-common graphviz && \
     rm -rf /var/lib/apt/lists/*
-
-
 
 RUN python -m pip install --upgrade pip && python3 -m pip install graphviz
