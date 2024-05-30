@@ -230,3 +230,5 @@ def demo_full_config_batch_env_collision_free_ik():
 
 if __name__ == "__main__":
     demo_basic_ik()
+    # demo_full_config_collision_free_ik()
+    # demo_full_config_batch_env_collision_free_ik()

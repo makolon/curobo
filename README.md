@@ -38,37 +38,6 @@ cuRobo performs trajectory optimization across many seeds in parallel to find a 
 </p>
 
 
-## Getting Started
-### Installation
-1. Clone this repository
-```
-cd ~/
-git clone git@github.com:makolon/curobo.git
-```
-2. Build docker
-```
-cd ~/curobo
-./docker/build_docker.sh isaac_sim_2023.1.0
-```
-
-3. Run docker
-```
-cd ~/curobo
-./docker/start_docker.sh isaac_sim_2023.1.0
-```
-
-> [!NOTE]
-> In the current version, it is necessary to execute the following command to reflect the changes made to curobot in the source code.
-> `cd ~/curobo && omni_python -m pip install .[dev] --no-build-isolation`
-> It takes about 10 minutes. 
-
-### Run demo
-Firstly, check whether the `omni_python` command can be run.
-Then, run the following command.
-```
-omni_python examples/isaac_sim/motion_gen_reacher.py --robot xarm7.yml --external_robot_configs_path /pkgs/curobo/src/curobo/content/configs/robot/
-```
-
 ## Citation
 
 If you found this work useful, please cite the below report,

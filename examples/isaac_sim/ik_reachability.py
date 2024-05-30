@@ -136,9 +136,11 @@ def main():
     xform = stage.DefinePrim("/World", "Xform")
     stage.SetDefaultPrim(xform)
     stage.DefinePrim("/curobo", "Xform")
+    # my_world.stage.SetDefaultPrim(my_world.stage.GetPrimAtPath("/World"))
     stage = my_world.stage
+    # stage.SetDefaultPrim(stage.GetPrimAtPath("/World"))
 
-    # make a target to follow
+    # Make a target to follow
     target = cuboid.VisualCuboid(
         "/World/target",
         position=np.array([0.5, 0, 0.5]),
@@ -212,11 +214,9 @@ def main():
     usd_help.load_stage(my_world.stage)
     usd_help.add_world_to_stage(world_cfg, base_frame="/World")
 
-    # add ground plane
-    my_world.scene.add_default_ground_plane()
-
     cmd_plan = None
     cmd_idx = 0
+    my_world.scene.add_default_ground_plane()
     i = 0
     spheres = None
     while simulation_app.is_running():
@@ -225,9 +225,12 @@ def main():
             if i % 100 == 0:
                 print("**** Click Play to start simulation *****")
             i += 1
+            # if step_index == 0:
+            #    my_world.play()
             continue
 
         step_index = my_world.current_time_step_index
+        # print(step_index)
         if step_index <= 2:
             my_world.reset()
             idx_list = [robot.get_dof_index(x) for x in j_names]
@@ -242,6 +245,7 @@ def main():
         if step_index == 50 or step_index % 500 == 0.0:  # and cmd_plan is None:
             print("Updating world, reading w.r.t.", robot_prim_path)
             obstacles = usd_help.get_obstacles_from_stage(
+                # only_paths=[obstacles_path],
                 reference_prim_path=robot_prim_path,
                 ignore_substring=[
                     robot_prim_path,
@@ -279,6 +283,7 @@ def main():
             if spheres is None:
                 spheres = []
                 # create spheres:
+
                 for si, s in enumerate(sph_list[0]):
                     sp = sphere.VisualSphere(
                         prim_path="/curobo/robot_sphere_" + str(si),
@@ -291,7 +296,7 @@ def main():
                 for si, s in enumerate(sph_list[0]):
                     spheres[si].set_world_pose(position=np.ravel(s.position))
                     spheres[si].set_radius(float(s.radius))
-
+        # print(sim_js.velocities)
         if (
             np.linalg.norm(cube_position - target_pose) > 1e-3
             and np.linalg.norm(past_pose - cube_position) == 0.0
@@ -322,8 +327,8 @@ def main():
 
             if succ:
                 # get all solutions:
-                cmd_plan = result.js_solution[result.success]
 
+                cmd_plan = result.js_solution[result.success]
                 # get only joint names that are in both:
                 idx_list = []
                 common_js_names = []
@@ -331,9 +336,12 @@ def main():
                     if x in cmd_plan.joint_names:
                         idx_list.append(robot.get_dof_index(x))
                         common_js_names.append(x)
+                # idx_list = [robot.get_dof_index(x) for x in sim_js_names]
 
                 cmd_plan = cmd_plan.get_ordered_joint_state(common_js_names)
+
                 cmd_idx = 0
+
             else:
                 carb.log_warn("Plan did not converge to a solution.  No action is being taken.")
             target_pose = cube_position

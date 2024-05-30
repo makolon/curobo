@@ -146,9 +146,11 @@ def main():
     xform = stage.DefinePrim("/World", "Xform")
     stage.SetDefaultPrim(xform)
     stage.DefinePrim("/curobo", "Xform")
+    # my_world.stage.SetDefaultPrim(my_world.stage.GetPrimAtPath("/World"))
     stage = my_world.stage
+    # stage.SetDefaultPrim(stage.GetPrimAtPath("/World"))
 
-    # make a target to follow
+    # Make a target to follow
     target = cuboid.VisualCuboid(
         "/World/target",
         position=np.array([0.5, 0, 0.5]),
@@ -179,26 +181,20 @@ def main():
     j_names = robot_cfg["kinematics"]["cspace"]["joint_names"]
     default_config = robot_cfg["kinematics"]["cspace"]["retract_config"]
 
-    # load robot to scene
-    robot, robot_prim_path = add_robot_to_scene(robot_cfg, my_world, load_from_usd=True)
+    robot, robot_prim_path = add_robot_to_scene(robot_cfg, my_world)
 
-    # define articulation controller
-    articulation_controller = robot.get_articulation_controller()
+    articulation_controller = None
 
-    # define table_collision
     world_cfg_table = WorldConfig.from_dict(
         load_yaml(join_path(get_world_configs_path(), "collision_table.yml"))
     )
     world_cfg_table.cuboid[0].pose[2] -= 0.02
-
-    # define mesh_collision
     world_cfg1 = WorldConfig.from_dict(
         load_yaml(join_path(get_world_configs_path(), "collision_table.yml"))
     ).get_mesh_world()
     world_cfg1.mesh[0].name += "_mesh"
     world_cfg1.mesh[0].pose[2] = -10.5
 
-    # define collision model throught WorldConfig
     world_cfg = WorldConfig(cuboid=world_cfg_table.cuboid, mesh=world_cfg1.mesh)
 
     trajopt_dt = None
@@ -209,12 +205,11 @@ def main():
     interpolation_dt = 0.05
     if args.reactive:
         trajopt_tsteps = 40
-        trajopt_dt = 0.05
+        trajopt_dt = 0.04
         optimize_dt = False
         max_attempts = 1
         trim_steps = [1, None]
         interpolation_dt = trajopt_dt
-
     motion_gen_config = MotionGenConfig.load_from_robot_config(
         robot_cfg,
         world_cfg,
@@ -229,8 +224,6 @@ def main():
         trajopt_tsteps=trajopt_tsteps,
         trim_steps=trim_steps,
     )
-
-    # load motion generation
     motion_gen = MotionGen(motion_gen_config)
     print("warming up...")
     motion_gen.warmup(enable_graph=True, warmup_js_trajopt=False, parallel_finetune=True)
@@ -239,7 +232,6 @@ def main():
 
     add_extensions(simulation_app, args.headless_mode)
 
-    # define planning config
     plan_config = MotionGenPlanConfig(
         enable_graph=False,
         enable_graph_attempt=2,
@@ -253,6 +245,7 @@ def main():
 
     cmd_plan = None
     cmd_idx = 0
+    my_world.scene.add_default_ground_plane()
     i = 0
     spheres = None
     past_cmd = None
@@ -265,12 +258,15 @@ def main():
             if i % 100 == 0:
                 print("**** Click Play to start simulation *****")
             i += 1
+            # if step_index == 0:
+            #    my_world.play()
             continue
 
         step_index = my_world.current_time_step_index
+        # print(step_index)
         if articulation_controller is None:
+            # robot.initialize()
             articulation_controller = robot.get_articulation_controller()
-
         if step_index < 2:
             my_world.reset()
             robot._articulation_view.initialize()
@@ -286,6 +282,7 @@ def main():
         if step_index == 50 or step_index % 1000 == 0.0:
             print("Updating world, reading w.r.t.", robot_prim_path)
             obstacles = usd_help.get_obstacles_from_stage(
+                # only_paths=[obstacles_path],
                 reference_prim_path=robot_prim_path,
                 ignore_substring=[
                     robot_prim_path,
@@ -318,7 +315,7 @@ def main():
             log_error("isaac sim has returned NAN joint position values.")
         cu_js = JointState(
             position=tensor_args.to_device(sim_js.positions),
-            velocity=tensor_args.to_device(sim_js.velocities),
+            velocity=tensor_args.to_device(sim_js.velocities),  # * 0.0,
             acceleration=tensor_args.to_device(sim_js.velocities) * 0.0,
             jerk=tensor_args.to_device(sim_js.velocities) * 0.0,
             joint_names=sim_js_names,
@@ -339,6 +336,8 @@ def main():
 
             if spheres is None:
                 spheres = []
+                # create spheres:
+
                 for si, s in enumerate(sph_list[0]):
                     sp = sphere.VisualSphere(
                         prim_path="/curobo/robot_sphere_" + str(si),
@@ -376,6 +375,7 @@ def main():
             )
             plan_config.pose_cost_metric = pose_metric
             result = motion_gen.plan_single(cu_js.unsqueeze(0), ik_goal, plan_config)
+            # ik_result = ik_solver.solve_single(ik_goal, cu_js.position.view(1,-1), cu_js.position.view(1,1,-1))
 
             succ = result.success.item()  # ik_result.success.item()
             if num_targets == 1:
@@ -389,7 +389,6 @@ def main():
                 if args.hold_partial_pose is not None:
                     hold_vec = motion_gen.tensor_args.to_device(args.hold_partial_pose)
                     pose_metric = PoseCostMetric(hold_partial_pose=True, hold_vec_weight=hold_vec)
-
             if succ:
                 num_targets += 1
                 cmd_plan = result.get_interpolated_plan()
@@ -401,6 +400,7 @@ def main():
                     if x in cmd_plan.joint_names:
                         idx_list.append(robot.get_dof_index(x))
                         common_js_names.append(x)
+                # idx_list = [robot.get_dof_index(x) for x in sim_js_names]
 
                 cmd_plan = cmd_plan.get_ordered_joint_state(common_js_names)
 
@@ -410,7 +410,6 @@ def main():
                 carb.log_warn("Plan did not converge to a solution.  No action is being taken.")
             target_pose = cube_position
             target_orientation = cube_orientation
-
         past_pose = cube_position
         past_orientation = cube_orientation
         if cmd_plan is not None:
