@@ -215,9 +215,4 @@ def save_log_motion_gen(robot_file: str = "franka.yml"):
 
 if __name__ == "__main__":
     setup_curobo_logger("error")
-<<<<<<< HEAD
-    save_log_motion_gen("franka.yml")
-=======
-    # save_log_motion_gen("franka.yml")
     save_curobo_robot_world_to_usd("ur5e_robotiq_2f_140.yml")
->>>>>>> upstream/main

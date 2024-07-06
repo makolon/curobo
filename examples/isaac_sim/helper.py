@@ -13,17 +13,13 @@
 from typing import Dict, List
 
 # Third Party
-import math
 import numpy as np
 from matplotlib import cm
 from omni.isaac.core import World
 from omni.isaac.core.materials import OmniPBR
 from omni.isaac.core.objects import cuboid
 from omni.isaac.core.robots import Robot
-from omni.isaac.core.utils.prims import get_prim_at_path
-from omni.isaac.core.utils.stage import add_reference_to_stage, get_current_stage
-from pxr import UsdPhysics, UsdLux, PhysxSchema
-
+from pxr import UsdPhysics
 
 # CuRobo
 from curobo.util.logger import log_warn
@@ -72,62 +68,43 @@ def add_robot_to_scene(
     robot_name: str = "robot",
     position: np.array = np.array([0, 0, 0]),
 ):
-    if load_from_usd:
-        import omni.isaac.core.utils.stage as stage_utils
-        usd_path = "/pkgs/curobo/src/curobo/content/assets/robot/xarm_description/usd/xarm7.usd"
-        robot_path="/World/xarm7"
+    urdf_interface = _urdf.acquire_urdf_interface()
 
-        # add to stage
-        stage_utils.add_reference_to_stage(usd_path, robot_path)
+    import_config = _urdf.ImportConfig()
+    import_config.merge_fixed_joints = False
+    import_config.convex_decomp = False
+    import_config.import_inertia_tensor = True
+    import_config.fix_base = True
+    import_config.make_default_prim = False
+    import_config.self_collision = False
+    import_config.create_physics_scene = True
+    import_config.import_inertia_tensor = False
+    import_config.default_drive_strength = 20000
+    import_config.default_position_drive_damping = 500
+    import_config.default_drive_type = _urdf.UrdfJointTargetType.JOINT_DRIVE_POSITION
+    import_config.distance_scale = 1
+    import_config.density = 0.0
+    asset_path = get_assets_path()
+    if (
+        "external_asset_path" in robot_config["kinematics"]
+        and robot_config["kinematics"]["external_asset_path"] is not None
+    ):
+        asset_path = robot_config["kinematics"]["external_asset_path"]
+    full_path = join_path(asset_path, robot_config["kinematics"]["urdf_path"])
+    robot_path = get_path_of_dir(full_path)
+    filename = get_filename(full_path)
+    imported_robot = urdf_interface.parse_urdf(robot_path, filename, import_config)
+    dest_path = subroot
+    robot_path = urdf_interface.import_robot(
+        robot_path,
+        filename,
+        imported_robot,
+        import_config,
+        dest_path,
+    )
 
-        robot_p = Robot(
-            prim_path=robot_path,
-            name="xarm7",
-            position=position)
-    else:
-        urdf_interface = _urdf.acquire_urdf_interface()
+    base_link_name = robot_config["kinematics"]["base_link"]
 
-<<<<<<< HEAD
-        import_config = _urdf.ImportConfig()
-        import_config.merge_fixed_joints = False
-        import_config.convex_decomp = False
-        import_config.import_inertia_tensor = True
-        import_config.fix_base = True
-        import_config.make_default_prim = False
-        import_config.self_collision = False
-        import_config.create_physics_scene = True
-        import_config.import_inertia_tensor = False
-        import_config.default_drive_strength = 20000
-        import_config.default_position_drive_damping = 500
-        import_config.default_drive_type = _urdf.UrdfJointTargetType.JOINT_DRIVE_POSITION
-        import_config.distance_scale = 1
-        import_config.density = 0.0
-        asset_path = get_assets_path()
-        if (
-            "external_asset_path" in robot_config["kinematics"]
-            and robot_config["kinematics"]["external_asset_path"] is not None
-        ):
-            asset_path = robot_config["kinematics"]["external_asset_path"]
-        full_path = join_path(asset_path, robot_config["kinematics"]["urdf_path"])
-        robot_path = get_path_of_dir(full_path)
-        filename = get_filename(full_path)
-        imported_robot = urdf_interface.parse_urdf(robot_path, filename, import_config)
-        dest_path = subroot
-        robot_path = urdf_interface.import_robot(
-            robot_path,
-            filename,
-            imported_robot,
-            import_config,
-            dest_path,
-        )
-        robot_p = Robot(
-            prim_path=robot_path,
-            name=robot_name,
-            position=position,
-        )
-    if ISAAC_SIM_23:
-        robot_p.set_solver_velocity_iteration_count(4)
-=======
     robot_p = Robot(
         prim_path=robot_path + "/" + base_link_name,
         name=robot_name,
@@ -140,22 +117,16 @@ def add_robot_to_scene(
 
     if False and ISAAC_SIM_23:  # this doesn't work in isaac sim 2023.1.1
         robot_p.set_solver_velocity_iteration_count(0)
->>>>>>> upstream/main
         robot_p.set_solver_position_iteration_count(44)
 
         my_world._physics_context.set_solver_type("PGS")
 
     if ISAAC_SIM_23:  # fix to load robot correctly in isaac sim 2023.1.1
-<<<<<<< HEAD
-        robot_prim = robot_p.prim
-        stage = robot_prim.GetStage()
-        base_link_name = robot_config["kinematics"]["base_link"]
-=======
->>>>>>> upstream/main
         linkp = stage.GetPrimAtPath(robot_path + "/" + base_link_name)
         mass = UsdPhysics.MassAPI(linkp)
         mass.GetMassAttr().Set(0)
     robot = my_world.scene.add(robot_p)
+    # robot_path = robot.prim_path
     return robot, robot_path
 
 
