@@ -13,70 +13,52 @@ ARG BASE_DIST=ubuntu20.04
 ARG CUDA_VERSION=11.4.2
 ARG ISAAC_SIM_VERSION=2022.2.1
 
-
 FROM nvcr.io/nvidia/isaac-sim:${ISAAC_SIM_VERSION} AS isaac-sim
-
 FROM nvcr.io/nvidia/cudagl:${CUDA_VERSION}-devel-${BASE_DIST}
 
-
-# this does not work for 2022.2.1
-#$FROM nvcr.io/nvidia/cuda:${CUDA_VERSION}-cudnn8-devel-${BASE_DIST} 
-
 LABEL maintainer "User Name"
-
 ARG VULKAN_SDK_VERSION=1.3.224.1
-
-
 
 # Deal with getting tons of debconf messages
 # See: https://github.com/phusion/baseimage-docker/issues/58
 RUN echo 'debconf debconf/frontend select Noninteractive' | debconf-set-selections
 
-
 # add GL if using a cuda docker instead of cudagl:
-#RUN apt-get update && apt-get install -y --no-install-recommends \
-#        pkg-config \
-#        libglvnd-dev \
-#        libgl1-mesa-dev \
-#        libegl1-mesa-dev \
-#        libgles2-mesa-dev && \
-#    rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends \
+       pkg-config \
+       libglvnd-dev \
+       libgl1-mesa-dev \
+       libegl1-mesa-dev \
+       libgles2-mesa-dev && \
+    rm -rf /var/lib/apt/lists/*
 
 # Set timezone info
 RUN apt-get update && apt-get install -y \
-  tzdata \
-  software-properties-common \
-  && rm -rf /var/lib/apt/lists/* \
-  && ln -fs /usr/share/zoneinfo/America/Los_Angeles /etc/localtime \
-  && echo "America/Los_Angeles" > /etc/timezone \
-  && dpkg-reconfigure -f noninteractive tzdata \
-  && add-apt-repository -y ppa:git-core/ppa \
-  && apt-get update && apt-get install -y \
-  curl \
-  lsb-core \
-  wget \
-  build-essential \
-  cmake \
-  git \
-  git-lfs \
-  iputils-ping \
-  make \
-  openssh-server \
-  openssh-client \
-  libeigen3-dev \
-  libssl-dev \
-  python3-pip \
-  python3-ipdb \
-  python3-tk \
-  python3-wstool \
-  sudo git bash unattended-upgrades \
-  apt-utils \
-  terminator \
-  && rm -rf /var/lib/apt/lists/*
-
+    tzdata \
+    software-properties-common \
+    curl \
+    lsb-core \
+    wget \
+    build-essential \
+    cmake \
+    git \
+    git-lfs \
+    iputils-ping \
+    make \
+    openssh-server \
+    openssh-client \
+    libeigen3-dev \
+    libssl-dev \
+    python3-pip \
+    python3-ipdb \
+    python3-tk \
+    python3-wstool \
+    sudo git bash unattended-upgrades \
+    apt-utils \
+    terminator \
+    && rm -rf /var/lib/apt/lists/*
 
 # https://catalog.ngc.nvidia.com/orgs/nvidia/containers/cudagl
-
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libatomic1 \
     libegl1 \
@@ -92,11 +74,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libssl1.1 \
     wget \
     vulkan-utils \
-&& apt-get -y autoremove \
-&& apt-get clean autoclean \
-&& rm -rf /var/lib/apt/lists/*
-
-
+    && apt-get -y autoremove \
+    && apt-get clean autoclean \
+    && rm -rf /var/lib/apt/lists/*
 
 # Download the Vulkan SDK and extract the headers, loaders, layers and binary utilities
 RUN wget -q --show-progress \
@@ -117,7 +97,6 @@ RUN wget -q --show-progress \
     && ldconfig \
     && rm /tmp/vulkansdk-linux-x86_64-${VULKAN_SDK_VERSION}.tar.gz && rm -rf /opt/vulkan
 
-
 # Setup the required capabilities for the container runtime    
 ENV NVIDIA_VISIBLE_DEVICES=all NVIDIA_DRIVER_CAPABILITIES=all
 
@@ -134,9 +113,6 @@ EXPOSE 47995-48012/udp \
        8891/tcp
 
 ENV OMNI_SERVER http://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/${ISAAC_SIM_VERSION}
-# ENV OMNI_SERVER omniverse://localhost/NVIDIA/Assets/Isaac/2022.1
-# ENV OMNI_USER admin
-# ENV OMNI_PASS admin
 ENV MIN_DRIVER_VERSION 525.60.11
 
 # Copy Isaac Sim files
@@ -148,49 +124,31 @@ COPY --from=isaac-sim /etc/vulkan/icd.d/nvidia_icd.json /etc/vulkan/implicit_lay
 
 WORKDIR /isaac-sim
 
-
-ENV TORCH_CUDA_ARCH_LIST="7.0+PTX"
-
-
-
-
 # create an alias for omniverse python
+ENV TORCH_CUDA_ARCH_LIST="7.0+PTX"
 ENV omni_python='/isaac-sim/python.sh'
-
 RUN echo "alias omni_python='/isaac-sim/python.sh'" >> /.bashrc
-
 
 # Add cache date to avoid using cached layers older than this
 ARG CACHE_DATE=2024-04-11
-
 RUN $omni_python -m pip install "robometrics[evaluator] @ git+https://github.com/fishbotics/robometrics.git"
 
 # if you want to use a different version of curobo, create folder as docker/pkgs and put your
 # version of curobo there. Then uncomment below line and comment the next line that clones from 
 # github
-
-# COPY pkgs /pkgs
-
 RUN mkdir /pkgs && cd /pkgs && git clone https://github.com/NVlabs/curobo.git
-
+COPY ./src/curobo/content/ /pkgs/curobot/content/
 RUN $omni_python -m pip install ninja wheel tomli
-
-
 RUN cd /pkgs/curobo && $omni_python -m pip install .[dev] --no-build-isolation
 
 WORKDIR /pkgs/curobo
 
 # Optionally install nvblox:
-
 RUN apt-get update && \
     apt-get install -y curl tcl && \
     rm -rf /var/lib/apt/lists/*
 
-
-
 # install gflags and glog statically, instructions from: https://github.com/nvidia-isaac/nvblox/blob/public/docs/redistributable.md
-
-
 RUN cd /pkgs && wget https://cmake.org/files/v3.27/cmake-3.27.1.tar.gz && \
     tar -xvzf cmake-3.27.1.tar.gz && \
     apt update &&  apt install -y build-essential checkinstall zlib1g-dev libssl-dev && \
@@ -198,17 +156,12 @@ RUN cd /pkgs && wget https://cmake.org/files/v3.27/cmake-3.27.1.tar.gz && \
     make -j8 && \
     make install &&  rm -rf /var/lib/apt/lists/*
 
-
 ENV USE_CX11_ABI=0
 ENV PRE_CX11_ABI=ON
-
-
 
 RUN cd /pkgs && git clone https://github.com/sqlite/sqlite.git -b version-3.39.4 && \
     cd /pkgs/sqlite && CFLAGS=-fPIC ./configure --prefix=/pkgs/sqlite/install/ && \
     make && make install
-
-
 
 RUN cd /pkgs && git clone https://github.com/google/glog.git -b v0.6.0 && \
     cd glog && \
@@ -217,7 +170,6 @@ RUN cd /pkgs && git clone https://github.com/google/glog.git -b v0.6.0 && \
     -DCMAKE_INSTALL_PREFIX=/pkgs/glog/install/ \
     -DWITH_GFLAGS=OFF -DWITH_GTEST=OFF -DBUILD_SHARED_LIBS=OFF -DCMAKE_CXX_FLAGS=-D_GLIBCXX_USE_CXX11_ABI=${USE_CX11_ABI} \
     && make -j8 && make install
-
 
 RUN cd /pkgs && git clone https://github.com/gflags/gflags.git -b v2.2.2 && \
     cd gflags &&  \
@@ -251,6 +203,4 @@ RUN cd /pkgs && git clone https://github.com/nvlabs/nvblox_torch.git && \
 
 # install realsense for nvblox demos:
 RUN $omni_python -m pip install pyrealsense2 opencv-python transforms3d
-
 RUN $omni_python -m pip install "robometrics[evaluator] @ git+https://github.com/fishbotics/robometrics.git"
-
