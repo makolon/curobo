@@ -10,13 +10,13 @@
 ##
 
 # Check architecture and load:
-ARG IMAGE_TAG 
+ARG IMAGE_TAG
 FROM curobo_docker:${IMAGE_TAG}
 
 # Set variables
 ARG USERNAME
 ARG USER_ID
-ARG CACHE_DATE=2024-03-18 
+ARG CACHE_DATE=2024-04-25
 
 # Set environment variables
 

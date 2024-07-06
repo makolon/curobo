@@ -8,4 +8,9 @@
 # without an express license agreement from NVIDIA CORPORATION or
 # its affiliates is strictly prohibited.
 #
-""" Module contains commonly used high-level APIs for motion generation. """
+
+# Standard Library
+import os
+
+os.environ["CUROBO_TORCH_COMPILE_DISABLE"] = str(1)
+os.environ["CUROBO_USE_LRU_CACHE"] = str(1)

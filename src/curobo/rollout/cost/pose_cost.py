@@ -105,9 +105,9 @@ class PoseCostMetric:
     @classmethod
     def create_grasp_approach_metric(
         cls,
-        offset_position: float = 0.5,
+        offset_position: float = 0.1,
         linear_axis: int = 2,
-        tstep_fraction: float = 0.6,
+        tstep_fraction: float = 0.8,
         tensor_args: TensorDeviceType = TensorDeviceType(),
     ) -> PoseCostMetric:
         """Enables moving to a pregrasp and then locked orientation movement to final grasp.
@@ -203,7 +203,6 @@ class PoseCost(CostBase, PoseCostConfig):
             self.offset_waypoint[:3].copy_(offset_rotation)
         self.offset_tstep_fraction[:] = offset_tstep_fraction
         if self._horizon <= 0:
-            print(self.weight)
             log_error(
                 "Updating offset waypoint is only possible after initializing motion gen"
                 + " run motion_gen.warmup() before adding offset_waypoint"
@@ -467,6 +466,8 @@ class PoseCost(CostBase, PoseCostConfig):
         batch_pose_idx: torch.Tensor,
         mode: PoseErrorType = PoseErrorType.BATCH_GOAL,
     ):
+        if len(query_pose.position.shape) == 2:
+            log_error("Query pose should be [batch, horizon, -1]")
         ee_goal_pos = goal_pose.position
         ee_goal_quat = goal_pose.quaternion
         self.cost_type = mode
@@ -477,9 +478,9 @@ class PoseCost(CostBase, PoseCostConfig):
         num_goals = 1
 
         distance = PoseError.apply(
-            query_pose.position.unsqueeze(1),
+            query_pose.position,
             ee_goal_pos,
-            query_pose.quaternion.unsqueeze(1),
+            query_pose.quaternion,
             ee_goal_quat,
             self.vec_weight,
             self.weight,

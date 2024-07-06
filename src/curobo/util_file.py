@@ -155,6 +155,8 @@ def get_files_from_dir(dir_path, extension: List[str], contains: str):
 
 
 def file_exists(path):
+    if path is None:
+        return False
     isExist = os.path.exists(path)
     return isExist
 
@@ -190,3 +192,11 @@ def get_multi_arm_robot_list() -> List[str]:
         "quad_ur10e.yml",
     ]
     return robot_list
+
+
+def merge_dict_a_into_b(a, b):
+    for k, v in a.items():
+        if isinstance(v, dict):
+            merge_dict_a_into_b(v, b[k])
+        else:
+            b[k] = v

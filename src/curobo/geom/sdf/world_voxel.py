@@ -42,6 +42,7 @@ class WorldVoxelCollision(WorldMeshCollision):
             and self.cache["voxel"] not in [None, 0]
         ):
             self._create_voxel_cache(self.cache["voxel"])
+        return super()._init_cache()
 
     def _create_voxel_cache(self, voxel_cache: Dict[str, Any]):
         n_layers = voxel_cache["layers"]
@@ -79,6 +80,9 @@ class WorldVoxelCollision(WorldMeshCollision):
         if feature_dtype in [torch.float32, torch.float16, torch.bfloat16]:
             voxel_features[:] = -1.0 * self.max_esdf_distance
         else:
+            if self.max_esdf_distance > 100.0:
+                log_warn("Using fp8 for WorldVoxelCollision will reduce max_esdf_distance to 100")
+                self.max_esdf_distance = 100.0
             voxel_features = (voxel_features.to(dtype=torch.float16) - self.max_esdf_distance).to(
                 dtype=feature_dtype
             )
@@ -502,9 +506,10 @@ class WorldVoxelCollision(WorldMeshCollision):
             False,
             use_batch_env,
             False,
-            True,
+            False,
             False,
         )
+
         if ("primitive" not in self.collision_types or not self.collision_types["primitive"]) and (
             "mesh" not in self.collision_types or not self.collision_types["mesh"]
         ):
@@ -699,7 +704,7 @@ class WorldVoxelCollision(WorldMeshCollision):
                     - self.max_esdf_distance
                 ).to(dtype=self._voxel_tensor_list[3].dtype)
             self._env_n_voxels[:] = 0
-            print(self._voxel_tensor_list)
+        super().clear_cache()
 
     def get_voxel_grid_shape(self, env_idx: int = 0, obs_idx: int = 0):
         return self._voxel_tensor_list[3][env_idx, obs_idx].shape

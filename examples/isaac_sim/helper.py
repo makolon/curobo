@@ -27,6 +27,7 @@ from pxr import UsdPhysics, UsdLux, PhysxSchema
 
 # CuRobo
 from curobo.util.logger import log_warn
+from curobo.util.usd_helper import set_prim_transform
 
 ISAAC_SIM_23 = False
 try:
@@ -86,6 +87,7 @@ def add_robot_to_scene(
     else:
         urdf_interface = _urdf.acquire_urdf_interface()
 
+<<<<<<< HEAD
         import_config = _urdf.ImportConfig()
         import_config.merge_fixed_joints = False
         import_config.convex_decomp = False
@@ -125,14 +127,31 @@ def add_robot_to_scene(
         )
     if ISAAC_SIM_23:
         robot_p.set_solver_velocity_iteration_count(4)
+=======
+    robot_p = Robot(
+        prim_path=robot_path + "/" + base_link_name,
+        name=robot_name,
+    )
+
+    robot_prim = robot_p.prim
+    stage = robot_prim.GetStage()
+    linkp = stage.GetPrimAtPath(robot_path)
+    set_prim_transform(linkp, [position[0], position[1], position[2], 1, 0, 0, 0])
+
+    if False and ISAAC_SIM_23:  # this doesn't work in isaac sim 2023.1.1
+        robot_p.set_solver_velocity_iteration_count(0)
+>>>>>>> upstream/main
         robot_p.set_solver_position_iteration_count(44)
 
         my_world._physics_context.set_solver_type("PGS")
 
     if ISAAC_SIM_23:  # fix to load robot correctly in isaac sim 2023.1.1
+<<<<<<< HEAD
         robot_prim = robot_p.prim
         stage = robot_prim.GetStage()
         base_link_name = robot_config["kinematics"]["base_link"]
+=======
+>>>>>>> upstream/main
         linkp = stage.GetPrimAtPath(robot_path + "/" + base_link_name)
         mass = UsdPhysics.MassAPI(linkp)
         mass.GetMassAttr().Set(0)

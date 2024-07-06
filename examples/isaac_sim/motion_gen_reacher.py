@@ -209,7 +209,7 @@ def main():
     interpolation_dt = 0.05
     if args.reactive:
         trajopt_tsteps = 40
-        trajopt_dt = 0.05
+        trajopt_dt = 0.04
         optimize_dt = False
         max_attempts = 1
         trim_steps = [1, None]
