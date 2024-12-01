@@ -54,7 +54,7 @@ from curobo.types.robot import JointState, RobotConfig
 from curobo.types.tensor import T_BDOF, T_DOF, T_BValue_bool, T_BValue_float
 from curobo.util.helpers import list_idx_if_not_none
 from curobo.util.logger import log_error, log_info, log_warn
-from curobo.util.torch_utils import get_torch_jit_decorator
+from curobo.util.torch_utils import get_torch_jit_decorator, is_cuda_graph_reset_available
 from curobo.util.trajectory import (
     InterpolateType,
     calculate_dt_no_clamp,
@@ -148,6 +148,8 @@ class TrajOptSolverConfig:
         filter_robot_command: bool = False,
         optimize_dt: bool = True,
         project_pose_to_goal_frame: bool = True,
+        use_cuda_graph_metrics: bool = False,
+        fix_terminal_action: bool = False,
     ):
         """Load TrajOptSolver configuration from robot configuration.
 
@@ -290,6 +292,10 @@ class TrajOptSolverConfig:
             project_pose_to_goal_frame: Project pose to goal frame when calculating distance
                 between reached and goal pose. Use this to constrain motion to specific axes
                 either in the global frame or the goal frame.
+            use_cuda_graph_metrics: Flag to enable cuda_graph when evaluating interpolated
+                trajectories after trajectory optimization. If interpolation_buffer is smaller
+                than interpolated trajectory, then the buffers will be re-created. This can cause
+                existing cuda graph to be invalid.
 
         Returns:
             TrajOptSolverConfig: Trajectory optimization configuration.
@@ -313,8 +319,6 @@ class TrajOptSolverConfig:
         if not self_collision_check:
             base_config_data["constraint"]["self_collision_cfg"]["weight"] = 0.0
             self_collision_opt = False
-        if not minimize_jerk:
-            filter_robot_command = False
 
         if collision_checker_type is not None:
             base_config_data["world_collision_checker_cfg"]["checker_type"] = collision_checker_type
@@ -335,6 +339,7 @@ class TrajOptSolverConfig:
         base_config_data["convergence"]["pose_cfg"]["project_distance"] = project_pose_to_goal_frame
         config_data["cost"]["pose_cfg"]["project_distance"] = project_pose_to_goal_frame
         grad_config_data["cost"]["pose_cfg"]["project_distance"] = project_pose_to_goal_frame
+        grad_config_data["lbfgs"]["fix_terminal_action"] = fix_terminal_action
 
         config_data["model"]["horizon"] = traj_tsteps
         grad_config_data["model"]["horizon"] = traj_tsteps
@@ -415,9 +420,10 @@ class TrajOptSolverConfig:
             tensor_args=tensor_args,
         )
 
-        safety_robot_model = robot_cfg.kinematics
-        safety_robot_cfg = RobotConfig(**vars(robot_cfg))
-        safety_robot_cfg.kinematics = safety_robot_model
+        # safety_robot_model = robot_cfg.kinematics
+        # safety_robot_cfg = RobotConfig(**vars(robot_cfg))
+        # safety_robot_cfg.kinematics = safety_robot_model
+        safety_robot_cfg = robot_cfg
         safety_cfg = ArmReacherConfig.from_dict(
             safety_robot_cfg,
             config_data["model"],
@@ -429,6 +435,30 @@ class TrajOptSolverConfig:
             world_coll_checker=world_coll_checker,
             tensor_args=tensor_args,
         )
+
+        aux_cfg = ArmReacherConfig.from_dict(
+            safety_robot_cfg,
+            config_data["model"],
+            config_data["cost"],
+            base_config_data["constraint"],
+            base_config_data["convergence"],
+            base_config_data["world_collision_checker_cfg"],
+            world_model,
+            world_coll_checker=world_coll_checker,
+            tensor_args=tensor_args,
+        )
+        interpolate_cfg = ArmReacherConfig.from_dict(
+            safety_robot_cfg,
+            config_data["model"],
+            config_data["cost"],
+            base_config_data["constraint"],
+            base_config_data["convergence"],
+            base_config_data["world_collision_checker_cfg"],
+            world_model,
+            world_coll_checker=world_coll_checker,
+            tensor_args=tensor_args,
+        )
+
         arm_rollout_mppi = None
         with profiler.record_function("trajopt_config/create_rollouts"):
             if use_particle_opt:
@@ -437,8 +467,8 @@ class TrajOptSolverConfig:
 
             arm_rollout_safety = ArmReacher(safety_cfg)
             if aux_rollout is None:
-                aux_rollout = ArmReacher(safety_cfg)
-            interpolate_rollout = ArmReacher(safety_cfg)
+                aux_rollout = ArmReacher(aux_cfg)
+            interpolate_rollout = ArmReacher(interpolate_cfg)
         if trajopt_dt is not None:
             if arm_rollout_mppi is not None:
                 arm_rollout_mppi.update_traj_dt(dt=trajopt_dt)
@@ -482,8 +512,8 @@ class TrajOptSolverConfig:
         cfg = WrapConfig(
             safety_rollout=arm_rollout_safety,
             optimizers=opt_list,
-            compute_metrics=True,  # not evaluate_interpolated_trajectory,
-            use_cuda_graph_metrics=grad_config_data["lbfgs"]["use_cuda_graph"],
+            compute_metrics=True,
+            use_cuda_graph_metrics=use_cuda_graph_metrics,
             sync_cuda_time=sync_cuda_time,
         )
         trajopt = WrapBase(cfg)
@@ -514,7 +544,7 @@ class TrajOptSolverConfig:
             tensor_args=tensor_args,
             sync_cuda_time=sync_cuda_time,
             interpolate_rollout=interpolate_rollout,
-            use_cuda_graph_metrics=use_cuda_graph,
+            use_cuda_graph_metrics=use_cuda_graph_metrics,
             trim_steps=trim_steps,
             store_debug_in_result=store_debug_in_result,
             optimize_dt=optimize_dt,
@@ -695,7 +725,7 @@ class TrajOptSolver(TrajOptSolverConfig):
             link_name: Name of the link to attach the spheres to. Note that this link should
                 already have pre-allocated spheres.
         """
-        self.kinematics.attach_object(
+        self.kinematics.kinematics_config.attach_object(
             sphere_radius=sphere_radius, sphere_tensor=sphere_tensor, link_name=link_name
         )
 
@@ -705,7 +735,7 @@ class TrajOptSolver(TrajOptSolverConfig):
         Args:
             link_name: Name of the link to detach the spheres from.
         """
-        self.kinematics.detach_object(link_name)
+        self.kinematics.kinematics_config.detach_object(link_name)
 
     def _update_solve_state_and_goal_buffer(
         self,
@@ -730,8 +760,11 @@ class TrajOptSolver(TrajOptSolverConfig):
 
         if update_reference:
             if self.use_cuda_graph and self._col is not None:
-                log_error("changing goal type, breaking previous cuda graph.")
-                self.reset_cuda_graph()
+                if is_cuda_graph_reset_available():
+                    log_warn("changing goal type, breaking previous cuda graph")
+                    self.reset_cuda_graph()
+                else:
+                    log_error("changing goal type not supported in cuda graph mode")
 
             self.solver.update_nproblems(self._solve_state.get_batch_size())
             self._col = torch.arange(
@@ -1273,34 +1306,39 @@ class TrajOptSolver(TrajOptSolverConfig):
         seed_traj: JointState,
         num_seeds: int,
         batch_mode: bool = False,
-    ):
+    ) -> TrajOptResult:
         """Get result from the optimization problem.
 
         Args:
-            result: _description_
-            return_all_solutions: _description_
-            goal: _description_
-            seed_traj: _description_
-            num_seeds: _description_
-            batch_mode: _description_
-
-        Raises:
-            log_error: _description_
-            ValueError: _description_
+            result: Result of the optimization problem.
+            return_all_solutions: Return solutions for all seeds.
+            goal: Goal object containing convergence parameters.
+            seed_traj: Seed trajectory used for optimization.
+            num_seeds: Number of seeds used for optimization.
+            batch_mode: Batch mode for problems.
 
         Returns:
-            _description_
+            TrajOptResult: Result of the trajectory optimization.
         """
         st_time = time.time()
         if self.trim_steps is not None:
             result.action = result.action.trim_trajectory(self.trim_steps[0], self.trim_steps[1])
-        interpolated_trajs, last_tstep, opt_dt = self.get_interpolated_trajectory(result.action)
+        interpolated_trajs, last_tstep, opt_dt, buffer_change = self.get_interpolated_trajectory(
+            result.action
+        )
+
         if self.sync_cuda_time:
             torch.cuda.synchronize(device=self.tensor_args.device)
         interpolation_time = time.time() - st_time
         if self.evaluate_interpolated_trajectory:
             with profiler.record_function("trajopt/evaluate_interpolated"):
-                if self.use_cuda_graph_metrics:
+                if self.use_cuda_graph_metrics and buffer_change:
+                    if is_cuda_graph_reset_available():
+                        self.interpolate_rollout.reset_cuda_graph()
+                        buffer_change = False
+                    else:
+                        self.interpolate_rollout.break_cuda_graph()
+                if self.use_cuda_graph_metrics and not buffer_change:
                     metrics = self.interpolate_rollout.get_metrics_cuda_graph(interpolated_trajs)
                 else:
                     metrics = self.interpolate_rollout.get_metrics(interpolated_trajs)
@@ -1309,9 +1347,10 @@ class TrajOptSolver(TrajOptSolverConfig):
                 result.metrics.rotation_error = metrics.rotation_error
                 result.metrics.cspace_error = metrics.cspace_error
                 result.metrics.goalset_index = metrics.goalset_index
+
         st_time = time.time()
         if result.metrics.cspace_error is None and result.metrics.position_error is None:
-            raise log_error("convergence check requires either goal_pose or goal_state")
+            log_error("convergence check requires either goal_pose or goal_state")
 
         success = jit_feasible_success(
             result.metrics.feasible,
@@ -1334,7 +1373,7 @@ class TrajOptSolver(TrajOptSolverConfig):
             elif result.metrics.cspace_error is not None:
                 converge = result.metrics.cspace_error[..., -1] <= self.cspace_threshold
             else:
-                raise ValueError("convergence check requires either goal_pose or goal_state")
+                log_error("convergence check requires either goal_pose or goal_state")
 
             success = torch.logical_and(feasible, converge)
         if return_all_solutions:
@@ -1428,13 +1467,22 @@ class TrajOptSolver(TrajOptSolverConfig):
                 opt_dt_v = opt_dt.view(1, 1)
             opt_solution = best_act_seq.scale_by_dt(self.solver_dt_tensor, opt_dt_v)
             select_time = time.time() - st_time
-            debug_info = None
+            debug_info = {}
             if self.store_debug_in_result:
                 debug_info = {
                     "solver": result.debug,
                     "interpolation_time": interpolation_time,
                     "select_time": select_time,
                 }
+            if not torch.count_nonzero(success) > 0:
+                max_dt = torch.max(opt_dt).item()
+                if max_dt >= self.traj_evaluator_config.max_dt:
+
+                    log_info(
+                        "Optimized dt is above maximum_trajectory_dt, consider \
+                            increasing max_trajectory_dt"
+                    )
+                    debug_info["dt_exception"] = True
             traj_result = TrajOptResult(
                 success=success,
                 goal=goal,
@@ -1495,6 +1543,10 @@ class TrajOptSolver(TrajOptSolverConfig):
         edges = torch.cat((start_q, end_q), dim=1)
 
         seed = self.delta_vec @ edges
+
+        # Setting final state to end_q explicitly to avoid matmul numerical precision issues.
+        seed[..., -1:, :] = end_q
+
         return seed
 
     def get_start_seed(self, start_state) -> torch.Tensor:
@@ -1677,6 +1729,10 @@ class TrajOptSolver(TrajOptSolverConfig):
         bias_q = self.bias_node.view(-1, 1, self.dof).repeat(start_q.shape[0], 1, 1)
         edges = torch.cat((start_q, bias_q, end_q), dim=1)
         seed = self.waypoint_delta_vec @ edges
+
+        # Setting final state to end_q explicitly to avoid matmul numerical precision issues.
+        seed[..., -1:, :] = end_q
+
         return seed
 
     @profiler.record_function("trajopt/interpolation")
@@ -1706,7 +1762,7 @@ class TrajOptSolver(TrajOptSolverConfig):
                 (b, self.interpolation_steps, dof), self.tensor_args
             )
             self._interpolated_traj_buffer.joint_names = self.rollout_fn.joint_names
-
+        interpolation_buffer_reallocated = False
         state, last_tstep, opt_dt = get_batch_interpolated_trajectory(
             traj_state,
             self.solver_dt_tensor,
@@ -1721,7 +1777,13 @@ class TrajOptSolver(TrajOptSolverConfig):
             max_dt=self.traj_evaluator_config.max_dt,
             optimize_dt=self.optimize_dt,
         )
-        return state, last_tstep, opt_dt
+
+        if state.shape != self._interpolated_traj_buffer.shape:
+            interpolation_buffer_reallocated = True
+            if is_cuda_graph_reset_available():
+                log_info("Interpolated trajectory buffer was recreated, reinitializing cuda graph")
+                self._interpolated_traj_buffer = state.clone()
+        return state, last_tstep, opt_dt, interpolation_buffer_reallocated
 
     def calculate_trajectory_dt(
         self,

@@ -11,12 +11,24 @@
 ARG DEBIAN_FRONTEND=noninteractive
 ARG BASE_DIST=ubuntu20.04
 ARG CUDA_VERSION=11.4.2
+<<<<<<< HEAD
 ARG ISAAC_SIM_VERSION=2023.1.1
+=======
+ARG ISAAC_SIM_VERSION=4.0.0
+
+>>>>>>> upstream/main
 
 FROM nvcr.io/nvidia/isaac-sim:${ISAAC_SIM_VERSION} AS isaac-sim
 FROM nvcr.io/nvidia/cudagl:${CUDA_VERSION}-devel-${BASE_DIST}
 
+<<<<<<< HEAD
 # this does not work for 2023.1.1
+=======
+
+# this does not work for 2022.2.1
+#$FROM nvcr.io/nvidia/cuda:${CUDA_VERSION}-cudnn8-devel-${BASE_DIST}
+
+>>>>>>> upstream/main
 LABEL maintainer "User Name"
 
 ARG VULKAN_SDK_VERSION=1.3.224.1
@@ -80,7 +92,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN wget -q --show-progress \
     --progress=bar:force:noscroll \
     https://sdk.lunarg.com/sdk/download/${VULKAN_SDK_VERSION}/linux/vulkansdk-linux-x86_64-${VULKAN_SDK_VERSION}.tar.gz \
-    -O /tmp/vulkansdk-linux-x86_64-${VULKAN_SDK_VERSION}.tar.gz \ 
+    -O /tmp/vulkansdk-linux-x86_64-${VULKAN_SDK_VERSION}.tar.gz \
     && echo "Installing Vulkan SDK ${VULKAN_SDK_VERSION}" \
     && mkdir -p /opt/vulkan \
     && tar -xf /tmp/vulkansdk-linux-x86_64-${VULKAN_SDK_VERSION}.tar.gz -C /opt/vulkan \
@@ -95,7 +107,12 @@ RUN wget -q --show-progress \
     && ldconfig \
     && rm /tmp/vulkansdk-linux-x86_64-${VULKAN_SDK_VERSION}.tar.gz && rm -rf /opt/vulkan
 
+<<<<<<< HEAD
 # Setup the required capabilities for the container runtime    
+=======
+
+# Setup the required capabilities for the container runtime
+>>>>>>> upstream/main
 ENV NVIDIA_VISIBLE_DEVICES=all NVIDIA_DRIVER_CAPABILITIES=all
 
 # Open ports for live streaming
@@ -125,6 +142,7 @@ ENV TORCH_CUDA_ARCH_LIST="7.0+PTX"
 
 # Create an alias for omniverse python
 ENV omni_python='/isaac-sim/python.sh'
+<<<<<<< HEAD
 RUN echo "alias omni_python='/isaac-sim/python.sh'" >> ~/.bashrc
 
 # Add cache date to avoid using cached layers older than this
@@ -135,6 +153,24 @@ RUN $omni_python -m pip install "robometrics[evaluator] @ git+https://github.com
 RUN mkdir /pkgs
 RUN cd /pkgs && \
     git clone https://github.com/makolon/curobo.git
+=======
+
+RUN echo "alias omni_python='/isaac-sim/python.sh'" >> ~/.bashrc
+
+
+# Add cache date to avoid using cached layers older than this
+ARG CACHE_DATE=2024-04-11
+
+
+# if you want to use a different version of curobo, create folder as docker/pkgs and put your
+# version of curobo there. Then uncomment below line and comment the next line that clones from
+# github
+
+# COPY pkgs /pkgs
+
+RUN mkdir /pkgs && cd /pkgs && git clone https://github.com/NVlabs/curobo.git
+
+>>>>>>> upstream/main
 RUN $omni_python -m pip install ninja wheel tomli
 RUN cd /pkgs/curobo && $omni_python -m pip install .[dev] --no-build-isolation
 WORKDIR /pkgs/curobo

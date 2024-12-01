@@ -24,7 +24,7 @@ except ImportError:
     from torch.utils.cpp_extension import load
 
     # CuRobo
-    from curobo.curobolib.util_file import add_cpp_path
+    from curobo.util_file import add_cpp_path
 
     kinematics_fused_cu = load(
         name="kinematics_fused_cu",
@@ -74,20 +74,20 @@ class KinematicsFusedFunction(Function):
             link_pos,
             link_quat,
             b_robot_spheres,
-            global_cumul_mat,
+            global_cumul_mat.view(-1),
             joint_seq,
-            fixed_transform,
-            robot_spheres,
+            fixed_transform.view(-1),
+            robot_spheres.view(-1),
             link_map,
             joint_map,
-            joint_map_type,
+            joint_map_type.view(-1),
             store_link_map,
             link_sphere_map,
-            joint_offset_map,  # offset_joint_map
+            joint_offset_map,
             b_size,
             n_joints,
             n_spheres,
-            True,
+            use_global_cumul,
         )
         out_link_pos = r[0]
         out_link_quat = r[1]
@@ -113,7 +113,6 @@ class KinematicsFusedFunction(Function):
     @staticmethod
     def backward(ctx, grad_out_link_pos, grad_out_link_quat, grad_out_spheres):
         grad_joint = None
-
         if ctx.needs_input_grad[4]:
             (
                 joint_seq,
@@ -193,10 +192,14 @@ class KinematicsFusedFunction(Function):
         b_size = b_shape[0]
         n_spheres = robot_sphere_out.shape[1]
         n_joints = angle.shape[-1]
-        if grad_out.is_contiguous():
-            grad_out = grad_out.view(-1)
-        else:
-            grad_out = grad_out.reshape(-1)
+        grad_out = grad_out.contiguous()
+        link_pos_out = link_pos_out.contiguous()
+        link_quat_out = link_quat_out.contiguous()
+        # if grad_out.is_contiguous():
+        #    grad_out = grad_out.view(-1)
+        # else:
+        #    grad_out = grad_out.reshape(-1)
+
         r = kinematics_fused_cu.backward(
             grad_out,
             link_pos_out,

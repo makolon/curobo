@@ -10,16 +10,122 @@ its affiliates is strictly prohibited.
 -->
 # Changelog
 
-## Latest Commit
+## Version 0.7.6
+
+### Changes in Default Behavior
+- Acceleration and Jerk in Output trajectory from motion_gen is not filtered. Previously, this was
+filtered with a sliding window to remove aliasing artifacts. To get previous behavior, set
+`filter_robot_command=True` in `MotionGenConfig.load_from_robot_config()`.
+- Terminal action for motion planning is now fixed from initial seed. This improves accuracy (10x).
+To get previous behavior, set `trajopt_fix_terminal_action=True` and also
+`trajopt_js_fix_terminal_action=True` in `MotionGenConfig.load_from_robot_config()`.
+- Introduce higher accuracy weights for IK in `gradient_ik_autotune.yml`. To use old file,
+pass `gradient_ik_file='gradient_ik.yml'` in `MotionGenConfig.load_from_robot_config()`. Similarly
+for IKSolver, pass `gradient_file='gradient_ik.yml'` in `IKSolverConfig.load_from_robot_config()`.
+
+### New Features
+- Add fix terminal action in quasi-netwon solvers. This keeps the final action constant (from
+initial seed) and only optimizing for the remaining states. Improved accuracy in
+reaching targets (10x improvement for Cartesian pose targets and exact reaching for joint position
+targets).
+
 
 ### BugFixes & Misc.
-- Add support for older warp versions (<1.0.0) as it's not possible to run older isaac sim with
-newer warp versions.
+
+- Fix bug (opposite sign) in gradient calculation for jerk. Trajectory optimizaiton generates
+shorter motion time trajectories.
+- Fix numerical precision issues when calculating linear interpolated seeds by copying terminal
+state to final action of trajectory after interpolation.
+
+
+## Version 0.7.5
+
+### Changes in Default Behavior
+- Remove explicit global seed setting for numpy and random. To enforce deterministic behavior,
+use `np.random.seed(2)` and `random.seed(2)` in your program.
+- geom.types.VoxelGrid now uses a different algorithm to calculate number of voxels per dimension
+and also to compute xyz locations in a grid. This new implementation matches implementation in
+nvblox.
+
+### New Features
+- Add pose cost metric to MPC to allow for partial pose reaching.
+- Update obstacle poses in cpu reference with an optional flag.
+- Add planning to grasp API in ``MotionGen.plan_grasp`` that plans a sequence of motions to grasp
+an object given grasp poses. This API also provides args to disable collisions during the grasping
+phase.
+- Constrained planning can now use either goal frame or base frame at runtime.
+
+### BugFixes & Misc.
+- Fixed optimize_dt not being correctly set when motion gen is called in reactive mode.
+- Add documentation for geom module.
+- Add descriptive api for computing kinematics.
+- Fix cv2 import order in isaac sim realsense examples.
+- Fix attach sphere api mismatch in ``TrajOptSolver``.
+- Fix bug in ``get_spline_interpolated_trajectory`` where
+numpy array was created instead of torch tensor.
+- Fix gradient bug when sphere origin is exactly at face of a cuboid.
+- Add support for parsing Yaml 1.2 format with an updated regex for scientific notations.
+- Move to yaml `SafeLoader` from `Loader`.
+- Graph search checks if a node exists before attempting to find a path.
+- Fix `steps_max` becoming 0 when optimized dt has NaN values.
+- Clone `MotionGenPlanConfig` instance for every plan api.
+- Improve sphere position to voxel location calculation to match nvblox's implementation.
+- Add self collision checking support for spheres > 1024 and number of checks > 512 * 1024.
+- Fix gradient passthrough in warp batch transform kernels.
+- Remove torch.Size() initialization with device kwarg.
+
+## Version 0.7.4
+
+### Changes in Default Behavior
+
+- Cuda graph capture of optimization iterations resets solver before recording.
+- ``join_path(a, b)`` now requires ``a`` to not have a trailing slash to make the file compatible with Windows.
+- Drop examples support for Isaac Sim < 4.0.0.
+- asset_root_path can be either empty string or None.
+- Order of variables in ``SelfCollisionKinematicsConfig`` has changed. Unused variables
+moved to bottom.
+- Remove requirement of warmup for using ``offset_waypoint`` in ``PoseCost``.
+
+### New Features
+
+- Interpolated metrics calculation now recreates cuda graph if interpolation steps exceed existing buffer size.
+- Add experimental ``CUDAGraph.reset`` usage as ``cuda>=12.0`` is not crashing when an existing captured CUDAGraph is freed and recaptured with new memory pointers. Try this experimental feature by
+setting an environment variable ``export CUROBO_TORCH_CUDA_GRAPH_RESET=1``. This feature will allow for changing the problem type in ``motion_gen`` and ``ik_solver`` without requiring recreation of the class.
+- Add partial support for Windows.
+- Add Isaac Sim 4.0.0 docker support.
+- Examples now work with Isaac Sim 4.0.0.
+- Add XRDF support.
+- Add curobo.types.file_path.ContentPath to store paths for files representing robot and world. This
+improves development on top of cuRobo with custom robots living external of cuRobo library.
+- Add attach external objects to robot link API to CudaRobotModel.
+- Add MotionGenStatus.DT_EXCEPTION to report failures due to trajectory exceeding user specified
+maximum trajectory dt.
+- Add reading of end-effector mesh if available when rendering trajectory with ``UsdHelper``, also
+supports goalset rendering.
+- Kinematics module (`curobo.cuda_robot_model`) has complete API documentation.
+
+### BugFixes & Misc.
+
+- Minor documentation fixes to install instructions.
+- Add support for older warp versions (<1.0.0) as it's not possible to run older isaac sim with newer warp versions.
 - Add override option to mpc dataclass.
 - Fix bug in ``PoseCost.forward_pose()`` which caused ``torch_layers_example.py`` to fail.
 - Add warp constants to make module hash depend on robot dof, for modules that generate runtime
 warp kernels. This fixes issues using cuRobo in isaac sim.
 - Add ``plan_config.timeout`` check to ``plan_single_js()``.
+- Recreation of interpolation buffer now copies the joint names from raw trajectory.
+- Fix bug in running captured cuda graph on deleted memory pointers
+when getting metrics on interpolated trajectory
+- Change order of operations in cuda graph capture of particle opt to get correct results
+during graph capture phase.
+- Franka Panda now works in Isaac Sim 4.0.0. The fix was to add inertial parameters to all links in
+the urdf.
+- Create new instances of rollouts in wrap classes to ensure cuda graph rollouts are not
+accidentally used in other pipelines.
+- Add cuda graph check for ``get_metrics``.
+- Remove aligned address assumption for float arrays inside kernel (local memory).
+- Add check for existing warp kernel in a module before creating a new one to avoid corruption of
+existing cuda graphs.
 
 ## Version 0.7.3
 

@@ -137,7 +137,7 @@ class HaltonSampleLib(BaseSampleLib):
         return self.samples
 
 
-def bspline(c_arr, t_arr=None, n=100, degree=3):
+def bspline(c_arr: torch.Tensor, t_arr=None, n=100, degree=3):
     sample_device = c_arr.device
     sample_dtype = c_arr.dtype
     cv = c_arr.cpu().numpy()
@@ -377,9 +377,7 @@ class SampleLib(BaseSampleLib):
                 if self.sample_ratio[k] == 0.0:
                     continue
                 n_samples = round(sample_shape[0] * self.sample_ratio[k])
-                s_shape = torch.Size(
-                    [n_samples], device=self.tensor_args.device, dtype=self.tensor_args.dtype
-                )
+                s_shape = torch.Size([n_samples])
                 # if(k == 'halton' or k == 'random'):
                 samples = self.sample_fns[k](sample_shape=s_shape)
                 # else:

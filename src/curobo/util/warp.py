@@ -9,6 +9,8 @@
 # its affiliates is strictly prohibited.
 #
 
+# Standard Library
+import os
 
 # Third Party
 import warp as wp
@@ -24,7 +26,10 @@ def init_warp(quiet=True, tensor_args: TensorDeviceType = TensorDeviceType()):
     # wp.config.print_launches = True
     # wp.config.verbose = True
     # wp.config.mode = "debug"
+    # wp.config.verify_cuda = True
     # wp.config.enable_backward = True
+    # wp.config.verify_autograd_array_access = True
+    # wp.config.cache_kernels = False
     wp.init()
 
     # wp.force_load(wp.device_from_torch(tensor_args.device))
@@ -60,3 +65,10 @@ def warp_support_kernel_key(wp_module=None):
         )
         return False
     return True
+
+
+def is_runtime_warp_kernel_enabled() -> bool:
+    env_variable = os.environ.get("CUROBO_WARP_RUNTIME_KERNEL_DISABLE")
+    if env_variable is None:
+        return True
+    return bool(int(env_variable))

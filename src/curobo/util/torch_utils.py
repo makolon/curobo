@@ -41,6 +41,17 @@ def is_cuda_graph_available():
     return True
 
 
+def is_cuda_graph_reset_available():
+    reset_cuda_graph = os.environ.get("CUROBO_TORCH_CUDA_GRAPH_RESET")
+    if reset_cuda_graph is not None:
+        if bool(int(reset_cuda_graph)):
+            if version.parse(torch.version.cuda) >= version.parse("12.0"):
+                return True
+        if not bool(int(reset_cuda_graph)):
+            return False
+    return False
+
+
 def is_torch_compile_available():
     force_compile = os.environ.get("CUROBO_TORCH_COMPILE_FORCE")
     if force_compile is not None and bool(int(force_compile)):
@@ -167,3 +178,9 @@ def get_cache_fn_decorator(maxsize: Optional[int] = None):
 
 def empty_decorator(function):
     return function
+
+
+@get_torch_jit_decorator()
+def round_away_from_zero(x: torch.Tensor) -> torch.Tensor:
+    y = torch.trunc(x + 0.5 * torch.sign(x))
+    return y

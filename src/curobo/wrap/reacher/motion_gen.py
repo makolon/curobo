@@ -180,7 +180,7 @@ class MotionGenConfig:
         world_coll_checker=None,
         base_cfg_file: str = "base_cfg.yml",
         particle_ik_file: str = "particle_ik.yml",
-        gradient_ik_file: str = "gradient_ik.yml",
+        gradient_ik_file: str = "gradient_ik_autotune.yml",
         graph_file: str = "graph.yml",
         particle_trajopt_file: str = "particle_trajopt.yml",
         gradient_trajopt_file: str = "gradient_trajopt.yml",
@@ -202,7 +202,7 @@ class MotionGenConfig:
         traj_evaluator_config: Optional[TrajEvaluatorConfig] = None,
         traj_evaluator: Optional[TrajEvaluator] = None,
         minimize_jerk: bool = True,
-        filter_robot_command: bool = True,
+        filter_robot_command: bool = False,
         use_gradient_descent: bool = False,
         collision_cache: Optional[Dict[str, int]] = None,
         n_collision_envs: Optional[int] = None,
@@ -242,6 +242,9 @@ class MotionGenConfig:
         ik_seed: int = 1531,
         graph_seed: int = 1531,
         high_precision: bool = False,
+        use_cuda_graph_trajopt_metrics: bool = False,
+        trajopt_fix_terminal_action: bool = True,
+        trajopt_js_fix_terminal_action: bool = True,
     ):
         """Create a motion generation configuration from robot and world configuration.
 
@@ -473,6 +476,18 @@ class MotionGenConfig:
                 the number of iterations for optimization solvers and reduce the thresholds for
                 position to 1mm and rotation to 0.025. Default of False is recommended for most
                 cases as standard motion generation settings reach within 0.5mm on most problems.
+            use_cuda_graph_trajopt_metrics: Flag to enable cuda_graph when evaluating interpolated
+                trajectories after trajectory optimization. If interpolation_buffer is smaller
+                than interpolated trajectory, then the buffers will be re-created. This can cause
+                existing cuda graph to be invalid.
+            trajopt_fix_terminal_action: Flag to disable optimizing for final state. When true,
+                the final state is unchanged from initial seed. When false, terminal state can
+                change based on cost. Setting to False will lead to worse accuracy at target
+                pose (>0.1mm). Setting to True can achieve < 0.01mm accuracy.
+            trajopt_js_fix_terminal_action: Flag to disable optimizing for final state for joint
+                space target planning. When true, the final state is unchanged from initial seed.
+                When false, terminal state can change based on cost. Setting to False will lead to
+                worse accuracy at target joint configuration.
 
         Returns:
             MotionGenConfig: Instance of motion generation configuration.
@@ -722,6 +737,8 @@ class MotionGenConfig:
             minimize_jerk=minimize_jerk,
             optimize_dt=optimize_dt,
             project_pose_to_goal_frame=project_pose_to_goal_frame,
+            use_cuda_graph_metrics=use_cuda_graph_trajopt_metrics,
+            fix_terminal_action=trajopt_fix_terminal_action,
         )
         trajopt_solver = TrajOptSolver(trajopt_cfg)
 
@@ -763,6 +780,8 @@ class MotionGenConfig:
             filter_robot_command=filter_robot_command,
             optimize_dt=optimize_dt,
             num_seeds=num_trajopt_noisy_seeds,
+            use_cuda_graph_metrics=use_cuda_graph_trajopt_metrics,
+            fix_terminal_action=trajopt_js_fix_terminal_action,
         )
         js_trajopt_solver = TrajOptSolver(js_trajopt_cfg)
 
@@ -805,6 +824,8 @@ class MotionGenConfig:
             filter_robot_command=filter_robot_command,
             optimize_dt=optimize_dt,
             project_pose_to_goal_frame=project_pose_to_goal_frame,
+            use_cuda_graph_metrics=use_cuda_graph_trajopt_metrics,
+            fix_terminal_action=trajopt_fix_terminal_action,
         )
 
         finetune_trajopt_solver = TrajOptSolver(finetune_trajopt_cfg)
@@ -847,6 +868,8 @@ class MotionGenConfig:
             filter_robot_command=filter_robot_command,
             optimize_dt=optimize_dt,
             num_seeds=num_trajopt_noisy_seeds,
+            use_cuda_graph_metrics=use_cuda_graph_trajopt_metrics,
+            fix_terminal_action=trajopt_js_fix_terminal_action,
         )
         finetune_js_trajopt_solver = TrajOptSolver(finetune_js_trajopt_cfg)
 
@@ -1051,6 +1074,10 @@ class MotionGenStatus(Enum):
     #: Finetune Trajectory optimization failed to find a solution.
     FINETUNE_TRAJOPT_FAIL = "Finetune TrajOpt Fail"
 
+    #: Optimized dt is greater than the maximum allowed dt. Set maximum_trajectory_dt to a higher
+    #: value.
+    DT_EXCEPTION = "dt exceeded maximum allowed trajectory dt"
+
     #: Invalid query was given. The start state is either out of joint limits, in collision with
     #: world, or in self-collision. In the future, this will also check for reachability of goal
     #: pose/ joint target in joint limits.
@@ -1068,6 +1095,8 @@ class MotionGenStatus(Enum):
     #: Invalid start state was given. The start state is out of joint limits.
     INVALID_START_STATE_JOINT_LIMITS = "Start state is out of joint limits"
 
+    #: Invalid partial pose target.
+    INVALID_PARTIAL_POSE_COST_METRIC = "Invalid partial pose metric"
     #: Motion generation query was successful.
     SUCCESS = "Success"
 
@@ -1286,7 +1315,7 @@ class MotionGenResult:
         interpolate_trajectory: bool = True,
         interpolation_dt: Optional[float] = None,
         interpolation_kind: InterpolateType = InterpolateType.LINEAR_CUDA,
-        create_interpolation_buffer: bool = False,
+        create_interpolation_buffer: bool = True,
     ):
         """Retime the optimized trajectory by a dilation factor.
 
@@ -1373,6 +1402,26 @@ class MotionGenResult:
         return current_tensor
 
 
+@dataclass
+class GraspPlanResult:
+    success: Optional[torch.Tensor] = None
+    grasp_trajectory: Optional[JointState] = None
+    grasp_trajectory_dt: Optional[torch.Tensor] = None
+    grasp_interpolated_trajectory: Optional[JointState] = None
+    grasp_interpolation_dt: Optional[torch.Tensor] = None
+    retract_trajectory: Optional[JointState] = None
+    retract_trajectory_dt: Optional[torch.Tensor] = None
+    retract_interpolated_trajectory: Optional[JointState] = None
+    retract_interpolation_dt: Optional[torch.Tensor] = None
+    approach_result: Optional[MotionGenResult] = None
+    grasp_result: Optional[MotionGenResult] = None
+    retract_result: Optional[MotionGenResult] = None
+    status: Optional[str] = None
+    goalset_result: Optional[MotionGenResult] = None
+    planning_time: float = 0.0
+    goalset_index: Optional[torch.Tensor] = None
+
+
 class MotionGen(MotionGenConfig):
     """Motion generation wrapper for generating collision-free trajectories.
 
@@ -1401,7 +1450,7 @@ class MotionGen(MotionGenConfig):
         self._rollout_list = None
         self._solver_rollout_list = None
         self._pose_solver_rollout_list = None
-
+        self._pose_rollout_list = None
         self._kin_list = None
         self.update_batch_size(seeds=self.trajopt_seeds)
 
@@ -1786,7 +1835,7 @@ class MotionGen(MotionGenConfig):
             world: New world configuration for collision checking.
         """
         self.world_coll_checker.load_collision_model(world, fix_cache_reference=self.use_cuda_graph)
-        self.graph_planner.reset_graph()
+        self.graph_planner.reset_buffer()
 
     def clear_world_cache(self):
         """Remove all collision objects from collision cache."""
@@ -2161,10 +2210,16 @@ class MotionGen(MotionGenConfig):
         Returns:
             bool: True if the constraint can be added, False otherwise.
         """
+
+        rollouts = self.get_all_pose_rollout_instances()
+
         # check if constraint is valid:
         if metric.hold_partial_pose and metric.offset_tstep_fraction < 0.0:
             start_pose = self.compute_kinematics(start_state).ee_pose.clone()
-            if self.project_pose_to_goal_frame:
+            project_distance = metric.project_to_goal_frame
+            if project_distance is None:
+                project_distance = rollouts[0].goal_cost.project_distance
+            if project_distance:
                 # project start pose to goal frame:
                 projected_pose = goal_pose.compute_local_pose(start_pose)
                 if torch.count_nonzero(metric.hold_vec_weight[:3] > 0.0) > 0:
@@ -2202,13 +2257,11 @@ class MotionGen(MotionGenConfig):
                     log_warn("Partial position between start and goal is not equal.")
                     return False
 
-        rollouts = self.get_all_pose_solver_rollout_instances()
         [
             rollout.update_pose_cost_metric(metric)
             for rollout in rollouts
             if isinstance(rollout, ArmReacher)
         ]
-        torch.cuda.synchronize(device=self.tensor_args.device)
         return True
 
     def get_all_rollout_instances(self) -> List[RolloutBase]:
@@ -2246,6 +2299,16 @@ class MotionGen(MotionGenConfig):
             )
         return self._pose_solver_rollout_list
 
+    def get_all_pose_rollout_instances(self) -> List[RolloutBase]:
+        """Get all rollout instances used across components in motion generation."""
+        if self._pose_rollout_list is None:
+            self._pose_rollout_list = (
+                self.ik_solver.get_all_rollout_instances()
+                + self.trajopt_solver.get_all_rollout_instances()
+                + self.finetune_trajopt_solver.get_all_rollout_instances()
+            )
+        return self._pose_rollout_list
+
     def get_all_kinematics_instances(self) -> List[CudaRobotModel]:
         """Get all kinematics instances used across components in motion generation.
 
@@ -2271,7 +2334,7 @@ class MotionGen(MotionGenConfig):
         voxelize_method: str = "ray",
         world_objects_pose_offset: Optional[Pose] = None,
         remove_obstacles_from_world_config: bool = False,
-    ) -> None:
+    ) -> bool:
         """Attach an object or objects from world to a robot's link.
 
         This method assumes that the objects exist in the world configuration. If attaching
@@ -2318,7 +2381,13 @@ class MotionGen(MotionGenConfig):
         sphere_tensor[:, 3] = -10.0
         sph_list = []
         if n_spheres == 0:
-            log_error("MG: No spheres found")
+            log_warn(
+                "MG: No spheres found, max_spheres: "
+                + str(max_spheres)
+                + " n_objects: "
+                + str(len(object_names))
+            )
+            return False
         for i, x in enumerate(object_names):
             obs = self.world_model.get_obstacle(x)
             if obs is None:
@@ -2351,6 +2420,8 @@ class MotionGen(MotionGenConfig):
 
         self.attach_spheres_to_robot(sphere_tensor=sphere_tensor, link_name=link_name)
 
+        return True
+
     def attach_external_objects_to_robot(
         self,
         joint_state: JointState,
@@ -2360,7 +2431,7 @@ class MotionGen(MotionGenConfig):
         sphere_fit_type: SphereFitType = SphereFitType.VOXEL_VOLUME_SAMPLE_SURFACE,
         voxelize_method: str = "ray",
         world_objects_pose_offset: Optional[Pose] = None,
-    ) -> None:
+    ) -> bool:
         """Attach external objects (not in world model) to a robot's link.
 
         Args:
@@ -2401,7 +2472,13 @@ class MotionGen(MotionGenConfig):
         sphere_tensor[:, 3] = -10.0
         sph_list = []
         if n_spheres == 0:
-            log_error("MG: No spheres found")
+            log_warn(
+                "MG: No spheres found, max_spheres: "
+                + str(max_spheres)
+                + " n_objects: "
+                + str(len(object_names))
+            )
+            return False
         for i, x in enumerate(object_names):
             obs = external_objects[i]
             sph = obs.get_bounding_spheres(
@@ -2423,6 +2500,7 @@ class MotionGen(MotionGenConfig):
         sphere_tensor[: spheres.shape[0], :] = spheres.contiguous()
 
         self.attach_spheres_to_robot(sphere_tensor=sphere_tensor, link_name=link_name)
+        return True
 
     def add_camera_frame(self, camera_observation: CameraObservation, obstacle_name: str):
         """Add camera frame to the world collision checker.
@@ -2654,7 +2732,8 @@ class MotionGen(MotionGenConfig):
                 the status of the start state.
         """
         joint_position = start_state.position
-
+        if self.rollout_fn.cuda_graph_instance:
+            log_error("Cannot check start state as this rollout_fn is used by a CUDA graph.")
         if len(joint_position.shape) == 1:
             joint_position = joint_position.unsqueeze(0)
         if len(joint_position.shape) > 2:
@@ -2924,6 +3003,7 @@ class MotionGen(MotionGenConfig):
         """
         start_time = time.time()
         valid_query = True
+        plan_config = plan_config.clone()
         if plan_config.check_start_validity:
             valid_query, status = self.check_start_state(start_state)
             if not valid_query:
@@ -2941,7 +3021,7 @@ class MotionGen(MotionGenConfig):
                 result = MotionGenResult(
                     success=torch.as_tensor([False], device=self.tensor_args.device),
                     valid_query=valid_query,
-                    status="Invalid Hold Partial Pose",
+                    status=MotionGenStatus.INVALID_PARTIAL_POSE_COST_METRIC,
                 )
                 return result
         self.update_batch_size(seeds=solve_state.num_trajopt_seeds, batch=solve_state.batch_size)
@@ -3063,6 +3143,7 @@ class MotionGen(MotionGenConfig):
             MotionGenResult: Result of batched planning.
         """
         start_time = time.time()
+        plan_config = plan_config.clone()
         goal_pose = goal_pose.clone()
         if plan_config.pose_cost_metric is not None:
             valid_query = self.update_pose_cost_metric(
@@ -3439,21 +3520,22 @@ class MotionGen(MotionGenConfig):
                     opt_dt = traj_result.optimized_dt
 
                     if plan_config.parallel_finetune:
-                        opt_dt = torch.min(opt_dt[traj_result.success])
                         seed_override = solve_state.num_trajopt_seeds * self.noisy_trajopt_seeds
+                        if self.optimize_dt:
+                            opt_dt = torch.min(opt_dt[traj_result.success])
 
                     finetune_time = 0
                     newton_iters = None
 
                     for k in range(plan_config.finetune_attempts):
-
-                        scaled_dt = torch.clamp(
-                            opt_dt
-                            * plan_config.finetune_dt_scale
-                            * (plan_config.finetune_dt_decay ** (k)),
-                            self.trajopt_solver.minimum_trajectory_dt,
-                        )
                         if self.optimize_dt:
+
+                            scaled_dt = torch.clamp(
+                                opt_dt
+                                * plan_config.finetune_dt_scale
+                                * (plan_config.finetune_dt_decay ** (k)),
+                                self.trajopt_solver.minimum_trajectory_dt,
+                            )
                             self.finetune_trajopt_solver.update_solver_dt(scaled_dt.item())
 
                         traj_result = self._solve_trajopt_from_solve_state(
@@ -3487,7 +3569,14 @@ class MotionGen(MotionGenConfig):
             result.success = traj_result.success
 
             if plan_config.enable_finetune_trajopt and torch.count_nonzero(result.success) == 0:
+
                 result.status = MotionGenStatus.FINETUNE_TRAJOPT_FAIL
+                if (
+                    traj_result.debug_info is not None
+                    and "dt_exception" in traj_result.debug_info
+                    and traj_result.debug_info["dt_exception"]
+                ):
+                    result.status = MotionGenStatus.DT_EXCEPTION
 
             result.interpolated_plan = traj_result.interpolated_solution.trim_trajectory(
                 0, traj_result.path_buffer_last_tstep[0]
@@ -3681,6 +3770,7 @@ class MotionGen(MotionGenConfig):
                     finetune_time = 0
                     newton_iters = None
                     for k in range(plan_config.finetune_attempts):
+
                         scaled_dt = torch.clamp(
                             opt_dt
                             * plan_config.finetune_js_dt_scale
@@ -3703,7 +3793,6 @@ class MotionGen(MotionGenConfig):
                         finetune_time += traj_result.solve_time
                         if torch.count_nonzero(traj_result.success) > 0 or not self.optimize_dt:
                             break
-
                         seed_traj = traj_result.optimized_seeds.detach().clone()
                         newton_iters = 4
 
@@ -3714,6 +3803,13 @@ class MotionGen(MotionGenConfig):
                     result.debug_info["finetune_trajopt_result"] = traj_result
                 if torch.count_nonzero(traj_result.success) == 0:
                     result.status = MotionGenStatus.FINETUNE_TRAJOPT_FAIL
+                    if (
+                        traj_result.debug_info is not None
+                        and "dt_exception" in traj_result.debug_info
+                        and traj_result.debug_info["dt_exception"]
+                    ):
+                        result.status = MotionGenStatus.DT_EXCEPTION
+
             elif plan_config.enable_finetune_trajopt:
                 traj_result.success = traj_result.success[0:1]
             result.solve_time += traj_result.solve_time + result.finetune_time
@@ -4088,4 +4184,244 @@ class MotionGen(MotionGenConfig):
             fail_on_invalid_query=fail_on_invalid_query,
         )
         result = self.plan_batch(start_state, goal_pose, plan_config)
+        return result
+
+    def toggle_link_collision(self, collision_link_names: List[str], enable_flag: bool):
+        if len(collision_link_names) > 0:
+            if enable_flag:
+                for k in collision_link_names:
+                    self.kinematics.kinematics_config.enable_link_spheres(k)
+            else:
+                for k in collision_link_names:
+                    self.kinematics.kinematics_config.disable_link_spheres(k)
+
+    def plan_grasp(
+        self,
+        start_state: JointState,
+        grasp_poses: Pose,
+        plan_config: MotionGenPlanConfig,
+        grasp_approach_offset: Pose = Pose.from_list([0, 0, -0.15, 1, 0, 0, 0]),
+        grasp_approach_path_constraint: Union[None, List[float]] = [0.1, 0.1, 0.1, 0.1, 0.1, 0.0],
+        retract_offset: Pose = Pose.from_list([0, 0, -0.15, 1, 0, 0, 0]),
+        retract_path_constraint: Union[None, List[float]] = [0.1, 0.1, 0.1, 0.1, 0.1, 0.0],
+        disable_collision_links: List[str] = [],
+        plan_approach_to_grasp: bool = True,
+        plan_grasp_to_retract: bool = True,
+        grasp_approach_constraint_in_goal_frame: bool = True,
+        retract_constraint_in_goal_frame: bool = True,
+    ) -> GraspPlanResult:
+        """Plan a sequence of motions to grasp an object, given a set of grasp poses.
+
+        This function plans three motions, first approaches the object with an offset, then
+        moves with linear constraints to the grasp pose, and finally retracts the arm base to
+        offset with linear constraints. During the linear constrained motions, collision between
+        disable_collision_links and the world is disabled. This disabling is useful to enable
+        contact between a robot's gripper links and the object.
+
+        This method takes a set of grasp poses and finds the best grasp pose to reach based on a
+        goal set trajectory optimization problem. In this problem, the robot needs to reach one
+        of the poses in the grasp_poses set at the terminal state. To allow for in-contact grasps,
+        collision between disable_collision_links and world is disabled during the optimization.
+        The best grasp pose is then used to plan the three motions.
+
+        Args:
+            start_state: Start joint state for planning.
+            grasp_poses: Set of grasp poses, represented with :class:~curobo.math.types.Pose, of
+                shape (1, num_grasps, 7).
+            plan_config: Planning parameters for motion generation.
+            grasp_approach_offset: Offset pose from the grasp pose. Reference frame is the grasp
+                pose frame if grasp_approach_constraint_in_goal_frame is True, otherwise the
+                reference frame is the robot base frame.
+            grasp_approach_path_constraint: Path constraint for the approach to grasp pose and
+                grasp to retract path. This is a list of 6 values, where each value is a weight
+                for each Cartesian dimension. The first three are for orientation and the last
+                three are for position. If None, no path constraint is applied.
+            retract_offset: Retract offset pose from grasp pose. Reference frame is the grasp pose
+                frame if retract_constraint_in_goal_frame is True, otherwise the reference frame is
+                the robot base frame.
+            retract_path_constraint: Path constraint for the retract path. This is a list of 6
+                values, where each value is a weight for each Cartesian dimension. The first three
+                are for orientation and the last three are for position. If None, no path
+                constraint is applied.
+            disable_collision_links: Name of links to disable collision with the world during
+                the approach to grasp and grasp to retract path.
+            plan_approach_to_grasp: If True, planning also includes moving from approach to
+                grasp. If False, a plan to reach offset of the best grasp pose is returned.
+            plan_grasp_to_retract: If True, planning also includes moving from grasp to retract.
+                If False, only a plan to reach the best grasp pose is returned.
+            grasp_approach_constraint_in_goal_frame: If True, the grasp approach offset is in the
+                grasp pose frame. If False, the grasp approach offset is in the robot base frame.
+                Also applies to grasp_approach_path_constraint.
+            retract_constraint_in_goal_frame: If True, the retract offset is in the grasp pose
+                frame. If False, the retract offset is in the robot base frame. Also applies to
+                retract_path_constraint.
+
+        Returns:
+            GraspPlanResult: Result of planning. Use :meth:`GraspPlanResult.grasp_trajectory` to
+                get the trajectory to reach the grasp pose and
+                :meth:`GraspPlanResult.retract_trajectory` to get the trajectory to retract from
+                the grasp pose.
+        """
+        if plan_config.pose_cost_metric is not None:
+            log_error("plan_config.pose_cost_metric should be None")
+        self.toggle_link_collision(disable_collision_links, False)
+        result = GraspPlanResult()
+        goalset_motion_gen_result = self.plan_goalset(
+            start_state,
+            grasp_poses,
+            plan_config,
+        )
+        self.toggle_link_collision(disable_collision_links, True)
+        result.success = goalset_motion_gen_result.success.clone()
+        result.success[:] = False
+        result.goalset_result = goalset_motion_gen_result
+        if not goalset_motion_gen_result.success.item():
+            result.status = "No grasp in goal set was reachable."
+            return result
+        result.goalset_index = goalset_motion_gen_result.goalset_index.clone()
+
+        # plan to offset:
+        goal_index = goalset_motion_gen_result.goalset_index.item()
+        goal_pose = grasp_poses.get_index(0, goal_index).clone()
+        if grasp_approach_constraint_in_goal_frame:
+            offset_goal_pose = goal_pose.clone().multiply(grasp_approach_offset)
+        else:
+            offset_goal_pose = grasp_approach_offset.clone().multiply(goal_pose.clone())
+
+        reach_offset_mg_result = self.plan_single(
+            start_state,
+            offset_goal_pose,
+            plan_config.clone(),
+        )
+        result.approach_result = reach_offset_mg_result
+        if not reach_offset_mg_result.success.item():
+            result.status = f"Planning to Approach pose failed: {reach_offset_mg_result.status}"
+            return result
+
+        if not plan_approach_to_grasp:
+            result.grasp_trajectory = reach_offset_mg_result.optimized_plan
+            result.grasp_trajectory_dt = reach_offset_mg_result.optimized_dt
+            result.grasp_interpolated_trajectory = reach_offset_mg_result.get_interpolated_plan()
+            result.grasp_interpolation_dt = reach_offset_mg_result.interpolation_dt
+            return result
+        # plan to final grasp
+        if grasp_approach_path_constraint is not None:
+            hold_pose_cost_metric = PoseCostMetric(
+                hold_partial_pose=True,
+                hold_vec_weight=self.tensor_args.to_device(grasp_approach_path_constraint),
+                project_to_goal_frame=grasp_approach_constraint_in_goal_frame,
+            )
+            plan_config.pose_cost_metric = hold_pose_cost_metric
+
+        offset_start_state = reach_offset_mg_result.optimized_plan[-1].unsqueeze(0)
+
+        self.toggle_link_collision(disable_collision_links, False)
+
+        reach_grasp_mg_result = self.plan_single(
+            offset_start_state,
+            goal_pose,
+            plan_config,
+        )
+        self.toggle_link_collision(disable_collision_links, True)
+        result.grasp_result = reach_grasp_mg_result
+        if not reach_grasp_mg_result.success.item():
+            result.status = (
+                f"Planning from Approach to Grasp Failed: {reach_grasp_mg_result.status}"
+            )
+            return result
+
+        # Get stitched trajectory:
+
+        offset_dt = reach_offset_mg_result.optimized_dt
+        grasp_dt = reach_grasp_mg_result.optimized_dt
+        if offset_dt > grasp_dt:
+            # retime grasp trajectory to match offset trajectory:
+            grasp_time_dilation = grasp_dt / offset_dt
+
+            reach_grasp_mg_result.retime_trajectory(
+                grasp_time_dilation,
+                interpolate_trajectory=True,
+            )
+        else:
+            offset_time_dilation = offset_dt / grasp_dt
+
+            reach_offset_mg_result.retime_trajectory(
+                offset_time_dilation,
+                interpolate_trajectory=True,
+            )
+
+        if (reach_offset_mg_result.optimized_dt - reach_grasp_mg_result.optimized_dt).abs() > 0.01:
+            reach_offset_mg_result.success[:] = False
+            if reach_offset_mg_result.debug_info is None:
+                reach_offset_mg_result.debug_info = {}
+            reach_offset_mg_result.debug_info["plan_single_grasp_status"] = (
+                "Stitching Trajectories Failed"
+            )
+            return reach_offset_mg_result, None
+
+        result.grasp_trajectory = reach_offset_mg_result.optimized_plan.stack(
+            reach_grasp_mg_result.optimized_plan
+        ).clone()
+
+        result.grasp_trajectory_dt = reach_offset_mg_result.optimized_dt
+
+        result.grasp_interpolated_trajectory = (
+            reach_offset_mg_result.get_interpolated_plan()
+            .stack(reach_grasp_mg_result.get_interpolated_plan())
+            .clone()
+        )
+        result.grasp_interpolation_dt = reach_offset_mg_result.interpolation_dt
+
+        # update trajectories in results:
+        result.planning_time = (
+            reach_offset_mg_result.total_time
+            + reach_grasp_mg_result.total_time
+            + goalset_motion_gen_result.total_time
+        )
+
+        # check if retract path is required:
+        result.success[:] = True
+        if not plan_grasp_to_retract:
+            return result
+
+        result.success[:] = False
+        self.toggle_link_collision(disable_collision_links, False)
+        grasp_start_state = result.grasp_trajectory[-1].unsqueeze(0)
+
+        # compute retract goal pose:
+        if retract_constraint_in_goal_frame:
+            retract_goal_pose = goal_pose.clone().multiply(retract_offset)
+        else:
+            retract_goal_pose = retract_offset.clone().multiply(goal_pose.clone())
+
+        # add path constraint for retract:
+        plan_config.pose_cost_metric = None
+
+        if retract_path_constraint is not None:
+            hold_pose_cost_metric = PoseCostMetric(
+                hold_partial_pose=True,
+                hold_vec_weight=self.tensor_args.to_device(retract_path_constraint),
+                project_to_goal_frame=retract_constraint_in_goal_frame,
+            )
+            plan_config.pose_cost_metric = hold_pose_cost_metric
+
+        # plan from grasp pose to retract:
+        retract_grasp_mg_result = self.plan_single(
+            grasp_start_state,
+            retract_goal_pose,
+            plan_config,
+        )
+        self.toggle_link_collision(disable_collision_links, True)
+        result.planning_time += retract_grasp_mg_result.total_time
+        if not retract_grasp_mg_result.success.item():
+            result.status = f"Retract from Grasp failed: {retract_grasp_mg_result.status}"
+            result.retract_result = retract_grasp_mg_result
+            return result
+        result.success[:] = True
+
+        result.retract_trajectory = retract_grasp_mg_result.optimized_plan
+        result.retract_trajectory_dt = retract_grasp_mg_result.optimized_dt
+        result.retract_interpolated_trajectory = retract_grasp_mg_result.get_interpolated_plan()
+        result.retract_interpolation_dt = retract_grasp_mg_result.interpolation_dt
+
         return result

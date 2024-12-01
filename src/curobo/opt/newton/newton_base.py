@@ -52,6 +52,7 @@ class NewtonOptConfig(OptimizerConfig):
     last_best: float = 0
     use_temporal_smooth: bool = False
     cost_relative_threshold: float = 0.999
+    fix_terminal_action: bool = False
 
     # use_update_best_kernel: bool
     # c_1: float
@@ -416,16 +417,21 @@ class NewtonOptBase(Optimizer, NewtonOptConfig):
     def _approx_line_search(self, x, step_direction):
         if self.step_scale != 0.0 and self.step_scale != 1.0:
             step_direction = self.scale_step_direction(step_direction)
+        if self.fix_terminal_action and self.action_horizon > 1:
+            step_direction[..., (self.action_horizon - 1) * self.d_action :] = 0.0
         if self.line_search_type == LineSearchType.GREEDY:
-            return self._greedy_line_search(x, step_direction)
+            best_x, best_c, best_grad = self._greedy_line_search(x, step_direction)
         elif self.line_search_type == LineSearchType.ARMIJO:
-            return self._armijo_line_search(x, step_direction)
+            best_x, best_c, best_grad = self._armijo_line_search(x, step_direction)
         elif self.line_search_type in [
             LineSearchType.WOLFE,
             LineSearchType.STRONG_WOLFE,
             LineSearchType.APPROX_WOLFE,
         ]:
-            return self._wolfe_line_search(x, step_direction)
+            best_x, best_c, best_grad = self._wolfe_line_search(x, step_direction)
+        if self.fix_terminal_action and self.action_horizon > 1:
+            best_grad[..., (self.action_horizon - 1) * self.d_action :] = 0.0
+        return best_x, best_c, best_grad
 
     def check_convergence(self, cost):
         above_threshold = cost > self.cost_convergence
@@ -530,6 +536,7 @@ class NewtonOptBase(Optimizer, NewtonOptConfig):
 
     def _create_opt_iters_graph(self, q, grad_q, shift_steps):
         # create a new stream:
+        self.reset()
         self._cu_opt_q_in = q.detach().clone()
         self._cu_opt_gq_in = grad_q.detach().clone()
         s = torch.cuda.Stream(device=self.tensor_args.device)
@@ -541,12 +548,13 @@ class NewtonOptBase(Optimizer, NewtonOptConfig):
                     self._cu_opt_q_in, self._cu_opt_gq_in, shift_steps
                 )
         torch.cuda.current_stream(device=self.tensor_args.device).wait_stream(s)
-
+        self.reset()
         self.cu_opt_graph = torch.cuda.CUDAGraph()
         with torch.cuda.graph(self.cu_opt_graph, stream=s):
             self._cu_opt_q, self._cu_opt_cost, self._cu_q, self._cu_gq = self._opt_iters(
                 self._cu_opt_q_in, self._cu_opt_gq_in, shift_steps
             )
+        torch.cuda.current_stream(device=self.tensor_args.device).wait_stream(s)
 
 
 @get_torch_jit_decorator()
@@ -601,10 +609,27 @@ def _wolfe_search_tail_jit(c, g_x, x_set, m, d_opt: int):
 
 
 @get_torch_jit_decorator()
-def scale_action(dx, action_step_max):
+def scale_action_old(dx, action_step_max):
     scale_value = torch.max(torch.abs(dx) / action_step_max, dim=-1, keepdim=True)[0]
     scale_value = torch.clamp(scale_value, 1.0)
     dx_scaled = dx / scale_value
+    return dx_scaled
+
+
+@get_torch_jit_decorator()
+def scale_action(dx, action_step_max):
+
+    # get largest dx scaled by bounds across optimization variables
+    scale_value = torch.max(torch.abs(dx) / action_step_max, dim=-1, keepdim=True)[0]
+
+    # scale dx to bring all dx within bounds:
+    # only perfom for dx that are greater than 1:
+
+    new_scale = torch.where(scale_value <= 1.0, 1.0, scale_value)
+    dx_scaled = dx / new_scale
+
+    # scale_value = torch.clamp(scale_value, 1.0)
+    # dx_scaled = dx / scale_value
     return dx_scaled
 
 

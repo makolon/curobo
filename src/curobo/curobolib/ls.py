@@ -24,7 +24,7 @@ except ImportError:
     from torch.utils.cpp_extension import load
 
     # CuRobo
-    from curobo.curobolib.util_file import add_cpp_path
+    from curobo.util_file import add_cpp_path
 
     line_search_cu = load(
         name="line_search_cu",
@@ -58,7 +58,6 @@ def wolfe_line_search(
     l1 = g_x.shape[1]
     l2 = g_x.shape[2]
     r = line_search_cu.line_search(
-        # m_idx,
         best_x,
         best_c,
         best_grad,
@@ -76,7 +75,6 @@ def wolfe_line_search(
         l2,
         batchsize,
     )
-    # print("batchsize:" + str(batchsize))
     return (r[0], r[1], r[2])
 
 

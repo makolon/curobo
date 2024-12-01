@@ -51,8 +51,11 @@ from curobo.opt.newton.lbfgs import LBFGSOpt, LBFGSOptConfig
 from curobo.opt.particle.parallel_es import ParallelES, ParallelESConfig
 from curobo.opt.particle.parallel_mppi import ParallelMPPI, ParallelMPPIConfig
 from curobo.rollout.arm_reacher import ArmReacher, ArmReacherConfig
+from curobo.rollout.cost.pose_cost import PoseCostMetric
+from curobo.rollout.dynamics_model.kinematic_model import KinematicModelState
 from curobo.rollout.rollout_base import Goal
 from curobo.types.base import TensorDeviceType
+from curobo.types.math import Pose
 from curobo.types.robot import JointState, RobotConfig
 from curobo.util.logger import log_error, log_info, log_warn
 from curobo.util_file import (
@@ -75,6 +78,9 @@ class MpcSolverConfig:
     #: MPC Solver.
     solver: WrapMpc
 
+    #: Rollout function for auxiliary rollouts.
+    rollout_fn: ArmReacher
+
     #: World Collision Checker.
     world_coll_checker: Optional[WorldCollision] = None
 
@@ -91,13 +97,13 @@ class MpcSolverConfig:
         base_cfg: Optional[dict] = None,
         tensor_args: TensorDeviceType = TensorDeviceType(),
         compute_metrics: bool = True,
-        use_cuda_graph: Optional[bool] = None,
+        use_cuda_graph: bool = True,
         particle_opt_iters: Optional[int] = None,
         self_collision_check: bool = True,
         collision_checker_type: Optional[CollisionCheckerType] = CollisionCheckerType.MESH,
         use_es: Optional[bool] = None,
         es_learning_rate: Optional[float] = 0.01,
-        use_cuda_graph_metrics: bool = False,
+        use_cuda_graph_metrics: bool = True,
         store_rollouts: bool = True,
         use_cuda_graph_full_step: bool = False,
         sync_cuda_time: bool = True,
@@ -110,6 +116,7 @@ class MpcSolverConfig:
         use_mppi: bool = True,
         particle_file: str = "particle_mpc.yml",
         override_particle_file: str = None,
+        project_pose_to_goal_frame: bool = True,
     ):
         """Create an MPC solver configuration from robot and world configuration.
 
@@ -157,6 +164,9 @@ class MpcSolverConfig:
             particle_file: Particle based MPC config file.
             override_particle_file: Optional config file for overriding the parameters in the
                 particle based MPC config file.
+            project_pose_to_goal_frame: Project pose to goal frame when calculating distance
+                between reached and goal pose. Use this to constrain motion to specific axes
+                either in the global frame or the goal frame.
 
         Returns:
             MpcSolverConfig: Configuration for the MPC solver.
@@ -181,6 +191,9 @@ class MpcSolverConfig:
         if n_collision_envs is not None:
             base_cfg["world_collision_checker_cfg"]["n_envs"] = n_collision_envs
 
+        base_cfg["cost"]["pose_cfg"]["project_distance"] = project_pose_to_goal_frame
+        base_cfg["convergence"]["pose_cfg"]["project_distance"] = project_pose_to_goal_frame
+        config_data["cost"]["pose_cfg"]["project_distance"] = project_pose_to_goal_frame
         if collision_activation_distance is not None:
             config_data["cost"]["primitive_collision_cfg"][
                 "activation_distance"
@@ -214,6 +227,7 @@ class MpcSolverConfig:
             config_data["model"] = grad_config_data["model"]
             if use_cuda_graph is not None:
                 grad_config_data["lbfgs"]["use_cuda_graph"] = use_cuda_graph
+            grad_config_data["cost"]["pose_cfg"]["project_distance"] = project_pose_to_goal_frame
 
         cfg = ArmReacherConfig.from_dict(
             robot_cfg,
@@ -226,9 +240,32 @@ class MpcSolverConfig:
             world_coll_checker=world_coll_checker,
             tensor_args=tensor_args,
         )
+        safety_cfg = ArmReacherConfig.from_dict(
+            robot_cfg,
+            config_data["model"],
+            config_data["cost"],
+            base_cfg["constraint"],
+            base_cfg["convergence"],
+            base_cfg["world_collision_checker_cfg"],
+            world_model,
+            world_coll_checker=world_coll_checker,
+            tensor_args=tensor_args,
+        )
+        aux_cfg = ArmReacherConfig.from_dict(
+            robot_cfg,
+            config_data["model"],
+            config_data["cost"],
+            base_cfg["constraint"],
+            base_cfg["convergence"],
+            base_cfg["world_collision_checker_cfg"],
+            world_model,
+            world_coll_checker=world_coll_checker,
+            tensor_args=tensor_args,
+        )
 
         arm_rollout_mppi = ArmReacher(cfg)
-        arm_rollout_safety = ArmReacher(cfg)
+        arm_rollout_safety = ArmReacher(safety_cfg)
+        arm_rollout_aux = ArmReacher(aux_cfg)
         config_data["mppi"]["store_rollouts"] = store_rollouts
         if use_cuda_graph is not None:
             config_data["mppi"]["use_cuda_graph"] = use_cuda_graph
@@ -285,6 +322,7 @@ class MpcSolverConfig:
             tensor_args=tensor_args,
             use_cuda_graph_full_step=use_cuda_graph_full_step,
             world_coll_checker=world_coll_checker,
+            rollout_fn=arm_rollout_aux,
         )
 
 
@@ -529,6 +567,7 @@ class MpcSolver(MpcSolverConfig):
                 is disabled.
         """
         self.solver.safety_rollout.enable_cspace_cost(enable)
+        self.rollout_fn.enable_cspace_cost(enable)
         for opt in self.solver.optimizers:
             opt.rollout_fn.enable_cspace_cost(enable)
 
@@ -539,6 +578,7 @@ class MpcSolver(MpcSolverConfig):
             enable: Enable or disable reaching pose cost. When False, pose cost is disabled.
         """
         self.solver.safety_rollout.enable_pose_cost(enable)
+        self.rollout_fn.enable_pose_cost(enable)
         for opt in self.solver.optimizers:
             opt.rollout_fn.enable_pose_cost(enable)
 
@@ -575,6 +615,99 @@ class MpcSolver(MpcSolverConfig):
         """Get rollouts for debugging."""
         return self.solver.optimizers[0].get_rollouts()
 
+    def update_pose_cost_metric(
+        self,
+        metric: PoseCostMetric,
+        start_state: Optional[JointState] = None,
+        goal_pose: Optional[Pose] = None,
+        check_validity: bool = True,
+    ) -> bool:
+        """Update the pose cost metric.
+
+        Only supports for the main end-effector. Does not support for multiple links that are
+        specified with `link_poses` in planning methods.
+
+        Args:
+            metric: Type and parameters for pose constraint to add.
+            start_state: Start joint state for the constraint.
+            goal_pose: Goal pose for the constraint.
+
+        Returns:
+            bool: True if the constraint can be added, False otherwise.
+        """
+        if check_validity:
+            # check if constraint is valid:
+            if metric.hold_partial_pose and metric.offset_tstep_fraction < 0.0:
+                if start_state is None:
+                    log_error("Need start state to hold partial pose")
+                if goal_pose is None:
+                    log_error("Need goal pose to hold partial pose")
+                start_pose = self.compute_kinematics(start_state).ee_pose.clone()
+                if self.project_pose_to_goal_frame:
+                    # project start pose to goal frame:
+                    projected_pose = goal_pose.compute_local_pose(start_pose)
+                    if torch.count_nonzero(metric.hold_vec_weight[:3] > 0.0) > 0:
+                        # angular distance should be zero:
+                        distance = projected_pose.angular_distance(
+                            Pose.from_list([0, 0, 0, 1, 0, 0, 0], tensor_args=self.tensor_args)
+                        )
+                        if torch.max(distance) > 0.05:
+                            log_warn(
+                                "Partial orientation between start and goal is not equal"
+                                + str(distance)
+                            )
+                            return False
+
+                    # check linear distance:
+                    if (
+                        torch.count_nonzero(
+                            torch.abs(
+                                projected_pose.position[..., metric.hold_vec_weight[3:] > 0.0]
+                            )
+                            > 0.005
+                        )
+                        > 0
+                    ):
+                        log_warn("Partial position between start and goal is not equal.")
+                        return False
+                else:
+                    # project start pose to goal frame:
+                    projected_position = goal_pose.position - start_pose.position
+                    # check linear distance:
+                    if (
+                        torch.count_nonzero(
+                            torch.abs(projected_position[..., metric.hold_vec_weight[3:] > 0.0])
+                            > 0.005
+                        )
+                        > 0
+                    ):
+                        log_warn("Partial position between start and goal is not equal.")
+                        return False
+
+        rollout_list = []
+        for opt in self.solver.optimizers:
+            rollout_list.append(opt.rollout_fn)
+        rollout_list += [self.solver.safety_rollout, self.rollout_fn]
+
+        [
+            rollout.update_pose_cost_metric(metric)
+            for rollout in rollout_list
+            if isinstance(rollout, ArmReacher)
+        ]
+        return True
+
+    def compute_kinematics(self, state: JointState) -> KinematicModelState:
+        """Compute kinematics for a given joint state.
+
+        Args:
+            state: Joint state of the robot. Only :attr:`JointState.position` is used.
+
+        Returns:
+            KinematicModelState: Kinematic state of the robot.
+        """
+        out = self.rollout_fn.compute_kinematics(state)
+        return out
+
     @property
     def joint_names(self):
         """Get the ordered joint names of the robot."""
@@ -588,7 +721,7 @@ class MpcSolver(MpcSolverConfig):
     @property
     def kinematics(self) -> CudaRobotModel:
         """Get kinematics instance of the robot."""
-        return self.solver.safety_rollout.dynamics_model.robot_model
+        return self.rollout_fn.dynamics_model.robot_model
 
     @property
     def world_collision(self) -> WorldCollision:
@@ -596,9 +729,9 @@ class MpcSolver(MpcSolverConfig):
         return self.world_coll_checker
 
     @property
-    def rollout_fn(self) -> ArmReacher:
-        """Get the rollout function."""
-        return self.solver.safety_rollout
+    def project_pose_to_goal_frame(self) -> bool:
+        """Check if the pose cost metric is projected to goal frame."""
+        return self.rollout_fn.goal_cost.project_distance
 
     def _step_once(
         self,

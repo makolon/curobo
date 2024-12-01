@@ -99,7 +99,7 @@ def get_linear_traj(
     return trajectory
 
 
-def get_smooth_trajectory(raw_traj, degree=5):
+def get_smooth_trajectory(raw_traj: torch.Tensor, degree: int = 5):
     cpu_traj = raw_traj.cpu()
 
     smooth_traj = torch.zeros_like(cpu_traj)
@@ -108,11 +108,10 @@ def get_smooth_trajectory(raw_traj, degree=5):
     return smooth_traj.to(dtype=raw_traj.dtype, device=raw_traj.device)
 
 
-def get_spline_interpolated_trajectory(raw_traj, des_horizon, degree=5):
+def get_spline_interpolated_trajectory(raw_traj: torch.Tensor, des_horizon: int, degree: int = 5):
     retimed_traj = torch.zeros((des_horizon, raw_traj.shape[-1]))
     tensor_args = TensorDeviceType(device=raw_traj.device, dtype=raw_traj.dtype)
-    cpu_traj = raw_traj.cpu().numpy()
-
+    cpu_traj = raw_traj.cpu()
     for i in range(cpu_traj.shape[-1]):
         retimed_traj[:, i] = bspline(cpu_traj[:, i], n=des_horizon, degree=degree)
     retimed_traj = retimed_traj.to(**(tensor_args.as_torch_dict()))
@@ -137,10 +136,19 @@ def get_batch_interpolated_trajectory(
     # compute dt across trajectory:
     if len(raw_traj.shape) == 2:
         raw_traj = raw_traj.unsqueeze(0)
+    if out_traj_state is not None and len(out_traj_state.shape) == 2:
+        out_traj_state = out_traj_state.unsqueeze(0)
     b, horizon, dof = raw_traj.position.shape  # horizon
     # given the dt required to run trajectory at maximum velocity,
     # we find the number of timesteps required:
     if optimize_dt:
+        if max_vel is None:
+            log_error("Max velocity not provided")
+        if max_acc is None:
+            log_error("Max acceleration not provided")
+        if max_jerk is None:
+            log_error("Max jerk not provided")
+    if max_vel is not None and max_acc is not None and max_jerk is not None:
         traj_vel = raw_traj.velocity
         traj_acc = raw_traj.acceleration
         traj_jerk = raw_traj.jerk
@@ -166,21 +174,25 @@ def get_batch_interpolated_trajectory(
         )
     else:
         traj_steps, steps_max = calculate_traj_steps(raw_dt, interpolation_dt, horizon)
-        opt_dt = raw_dt
+        opt_dt = torch.zeros(b, device=tensor_args.device)
+        opt_dt[:] = raw_dt
     # traj_steps contains the tsteps for each trajectory
     if steps_max <= 0:
-        log_error("Steps max is less than 0")
+        log_error("Steps max is less than 1, with a value: " + str(steps_max))
 
     if out_traj_state is not None and out_traj_state.position.shape[1] < steps_max:
         log_warn(
-            "Interpolation buffer shape is smaller than steps_max,"
+            "Interpolation buffer shape is smaller than steps_max: "
+            + str(out_traj_state.position.shape)
             + " creating new buffer of shape "
             + str(steps_max)
         )
         out_traj_state = None
 
     if out_traj_state is None:
-        out_traj_state = JointState.zeros([b, steps_max, dof], tensor_args)
+        out_traj_state = JointState.zeros(
+            [b, steps_max, dof], tensor_args, joint_names=raw_traj.joint_names
+        )
 
     if kind in [InterpolateType.LINEAR, InterpolateType.CUBIC]:
         # plot and save:
@@ -597,5 +609,7 @@ def calculate_tsteps(
     )
     if not optimize_dt:
         opt_dt[:] = raw_dt
+    # check for nan:
+    opt_dt = torch.nan_to_num(opt_dt, nan=min_dt)
     traj_steps, steps_max = calculate_traj_steps(opt_dt, interpolation_dt, horizon)
     return traj_steps, steps_max, opt_dt

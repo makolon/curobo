@@ -178,6 +178,7 @@ class ArmReacher(ArmBase, ArmReacherConfig):
             # self.cost_cfg.cspace_cfg.update_vec_weight(self.dynamics_model.cspace_distance_weight)
             self.dist_cost = DistCost(self.cost_cfg.cspace_cfg)
         if self.cost_cfg.pose_cfg is not None:
+            self.cost_cfg.pose_cfg.waypoint_horizon = self.horizon
             self.goal_cost = PoseCost(self.cost_cfg.pose_cfg)
             if self.cost_cfg.link_pose_cfg is None:
                 log_info(
@@ -265,7 +266,6 @@ class ArmReacher(ArmBase, ArmReacherConfig):
                     goal_cost = self.goal_cost.forward(
                         ee_pos_batch, ee_quat_batch, self._goal_buffer
                     )
-                # print(self._compute_g_dist, goal_cost.view(-1))
                 cost_list.append(goal_cost)
         with profiler.record_function("cost/link_poses"):
             if self._goal_buffer.links_goal_pose is not None and self.cost_cfg.pose_cfg is not None:
@@ -338,7 +338,6 @@ class ArmReacher(ArmBase, ArmReacherConfig):
             out_metrics = ArmReacherMetrics()
         if not isinstance(out_metrics, ArmReacherMetrics):
             out_metrics = ArmReacherMetrics(**vars(out_metrics))
-        # print(self._goal_buffer.batch_retract_state_idx)
         out_metrics = super(ArmReacher, self).convergence_fn(state, out_metrics)
 
         # compute error with pose?
@@ -368,8 +367,8 @@ class ArmReacher(ArmBase, ArmReacherConfig):
                     current_fn = self._link_pose_convergence[k]
                     if current_fn.enabled:
                         # get link pose
-                        current_pos = link_poses[k].position
-                        current_quat = link_poses[k].quaternion
+                        current_pos = link_poses[k].position.contiguous()
+                        current_quat = link_poses[k].quaternion.contiguous()
 
                         pose_err, pos_err, quat_err = current_fn.forward_out_distance(
                             current_pos, current_quat, self._goal_buffer, k
@@ -436,7 +435,14 @@ class ArmReacher(ArmBase, ArmReacherConfig):
             self.dist_cost.disable_cost()
             self.cspace_convergence.disable_cost()
 
-    def get_pose_costs(self, include_link_pose: bool = False, include_convergence: bool = True):
+    def get_pose_costs(
+        self,
+        include_link_pose: bool = False,
+        include_convergence: bool = True,
+        only_convergence: bool = False,
+    ):
+        if only_convergence:
+            return [self.pose_convergence]
         pose_costs = [self.goal_cost]
         if include_convergence:
             pose_costs += [self.pose_convergence]
@@ -448,33 +454,15 @@ class ArmReacher(ArmBase, ArmReacherConfig):
         self,
         metric: PoseCostMetric,
     ):
-        pose_costs = self.get_pose_costs()
-        if metric.hold_partial_pose:
-            if metric.hold_vec_weight is None:
-                log_error("hold_vec_weight is required")
-            [x.hold_partial_pose(metric.hold_vec_weight) for x in pose_costs]
-        if metric.release_partial_pose:
-            [x.release_partial_pose() for x in pose_costs]
-        if metric.reach_partial_pose:
-            if metric.reach_vec_weight is None:
-                log_error("reach_vec_weight is required")
-            [x.reach_partial_pose(metric.reach_vec_weight) for x in pose_costs]
-        if metric.reach_full_pose:
-            [x.reach_full_pose() for x in pose_costs]
+        pose_costs = self.get_pose_costs(
+            include_link_pose=metric.include_link_pose, include_convergence=False
+        )
+        for p in pose_costs:
+            p.update_metric(metric, update_offset_waypoint=True)
 
-        pose_costs = self.get_pose_costs(include_convergence=False)
-        if metric.remove_offset_waypoint:
-            [x.remove_offset_waypoint() for x in pose_costs]
-
-        if metric.offset_position is not None or metric.offset_rotation is not None:
-            [
-                x.update_offset_waypoint(
-                    offset_position=metric.offset_position,
-                    offset_rotation=metric.offset_rotation,
-                    offset_tstep_fraction=metric.offset_tstep_fraction,
-                )
-                for x in pose_costs
-            ]
+        pose_costs = self.get_pose_costs(only_convergence=True)
+        for p in pose_costs:
+            p.update_metric(metric, update_offset_waypoint=False)
 
 
 @get_torch_jit_decorator()

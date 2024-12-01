@@ -146,7 +146,6 @@ namespace Curobo
       }
     }
 
-    template<bool project_distance>
     __device__ __forceinline__ void
     compute_pose_distance_vector(float       *result_vec,
                                  const float3 goal_position,
@@ -156,7 +155,8 @@ namespace Curobo
                                  const float *vec_weight,
                                  const float3 offset_position,
                                  const float3 offset_rotation,
-                                 const bool   reach_offset)
+                                 const bool   reach_offset,
+                                 const bool project_distance)
     {
       // project current position to goal frame:
       float3 error_position = make_float3(0, 0, 0);
@@ -253,7 +253,7 @@ namespace Curobo
       }
     }
 
-    template<bool project_distance, bool use_metric>
+    template<bool use_metric>
     __device__ __forceinline__ void
     compute_pose_distance(float *distance_vec, float& distance, float& position_distance,
                           float& rotation_distance, const float3 current_position,
@@ -265,17 +265,19 @@ namespace Curobo
                           const float r_alpha,
                           const float3 offset_position,
                           const float3 offset_rotation,
-                          const bool reach_offset)
+                          const bool reach_offset,
+                          const bool project_distance)
     {
-      compute_pose_distance_vector<project_distance>(&distance_vec[0],
-                                                     goal_position,
-                                                     goal_quat,
-                                                     current_position,
-                                                     current_quat,
-                                                     &vec_weight[0],
-                                                     offset_position,
-                                                     offset_rotation,
-                                                     reach_offset);
+      compute_pose_distance_vector(&distance_vec[0],
+                                    goal_position,
+                                    goal_quat,
+                                    current_position,
+                                    current_quat,
+                                    &vec_weight[0],
+                                    offset_position,
+                                    offset_rotation,
+                                    reach_offset,
+                                    project_distance);
 
       position_distance = 0;
       rotation_distance = 0;
@@ -394,7 +396,7 @@ namespace Curobo
       *(float3 *)&out_grad_q[batch_idx * 4 + 1] = g_q;
     }
 
-    template<typename scalar_t, bool write_distance, bool project_distance, bool use_metric>
+    template<typename scalar_t, bool write_distance, bool use_metric>
     __global__ void goalset_pose_distance_kernel(
       scalar_t *out_distance, scalar_t *out_position_distance,
       scalar_t *out_rotation_distance, scalar_t *out_p_vec, scalar_t *out_q_vec,
@@ -405,7 +407,9 @@ namespace Curobo
       const scalar_t *run_weight, const scalar_t *run_vec_weight,
       const scalar_t *offset_waypoint,
       const scalar_t *offset_tstep_fraction,
-      const int32_t *batch_pose_idx, const int mode, const int num_goals,
+      const int32_t *batch_pose_idx,
+      const uint8_t *project_distance_tensor,
+      const int mode, const int num_goals,
       const int batch_size, const int horizon, const bool write_grad = false)
     {
       const int t_idx     = (blockDim.x * blockIdx.x + threadIdx.x);
@@ -416,7 +420,7 @@ namespace Curobo
       {
         return;
       }
-
+      const bool project_distance = project_distance_tensor[0];
       // read current pose:
       float3 position =
         *(float3 *)&current_position[batch_idx * horizon * 3 + h_idx * 3];
@@ -434,15 +438,25 @@ namespace Curobo
                                                                                 // is ? horizon, not
                                                                                 // in this mode
       float d_vec_weight[6] = { 0.0 };
-      *(float3 *)&d_vec_weight[0] = *(float3 *)&vec_weight[0];
-      *(float3 *)&d_vec_weight[3] = *(float3 *)&vec_weight[3];
+      #pragma unroll 6
+      for (int k = 0; k < 6; k++)
+      {
+        d_vec_weight[k] = vec_weight[k];
+      }
+      //*(float3 *)&d_vec_weight[0] = *(float3 *)&vec_weight[0]; // TODO
+      //*(float3 *)&d_vec_weight[3] = *(float3 *)&vec_weight[3];
       float3 offset_rotation = *(float3 *)&offset_waypoint[0];
       float3 offset_position = *(float3 *)&offset_waypoint[3];
 
       if ((h_idx < horizon - 1) && (h_idx != horizon - offset_tstep))
       {
-        *(float3 *)&d_vec_weight[0] *= *(float3 *)&run_vec_weight[0];
-        *(float3 *)&d_vec_weight[3] *= *(float3 *)&run_vec_weight[3];
+        #pragma unroll 6
+        for (int k = 0; k < 6; k++)
+        {
+          d_vec_weight[k] *= run_vec_weight[k];
+        }
+        //*(float3 *)&d_vec_weight[0] *= *(float3 *)&run_vec_weight[0];
+        //*(float3 *)&d_vec_weight[3] *= *(float3 *)&run_vec_weight[3];
       }
 
       if (!write_distance)
@@ -450,8 +464,8 @@ namespace Curobo
         position_weight *= run_weight[h_idx];
         rotation_weight *= run_weight[h_idx];
         float sum_weight = 0;
-    #pragma unroll 6
 
+        #pragma unroll 6
         for (int i = 0; i < 6; i++)
         {
           sum_weight += d_vec_weight[i];
@@ -480,7 +494,9 @@ namespace Curobo
       float  best_distance_vec[6]   = { 0.0 };
       float  d_vec_convergence[2];
 
-      *(float2 *)&d_vec_convergence[0] = *(float2 *)&vec_convergence[0];
+      //*(float2 *)&d_vec_convergence[0] = *(float2 *)&vec_convergence[0]; // TODO
+      d_vec_convergence[0] = vec_convergence[0];
+      d_vec_convergence[1] = vec_convergence[1];
 
       int best_idx = -1;
 
@@ -499,7 +515,7 @@ namespace Curobo
         float4 gq4 = *(float4 *)&goal_quat[(offset + k) * 4];
         l_goal_quat = make_float4(gq4.y, gq4.z, gq4.w, gq4.x);
 
-        compute_pose_distance<project_distance, use_metric>(&distance_vec[0],
+        compute_pose_distance<use_metric>(&distance_vec[0],
                                                             pose_distance,
                                                             position_distance,
                                                             rotation_distance,
@@ -519,7 +535,8 @@ namespace Curobo
                                                             r_w_alpha,
                                                             offset_position,
                                                             offset_rotation,
-                                                            reach_offset);
+                                                            reach_offset,
+                                                            project_distance);
 
         if (pose_distance <= best_distance)
         {
@@ -645,10 +662,10 @@ pose_distance(torch::Tensor out_distance, torch::Tensor out_position_distance,
               const torch::Tensor offset_waypoint,
               const torch::Tensor offset_tstep_fraction,
               const torch::Tensor batch_pose_idx, // batch_size, 1
+              const torch::Tensor project_distance,
               const int batch_size, const int horizon, const int mode,
               const int num_goals = 1, const bool compute_grad = false,
-              const bool write_distance = true, const bool use_metric = false,
-              const bool project_distance = true)
+              const bool write_distance = true, const bool use_metric = false)
 {
   using namespace Curobo::Pose;
 
@@ -672,8 +689,7 @@ pose_distance(torch::Tensor out_distance, torch::Tensor out_position_distance,
 
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
-  if (project_distance)
-  {
+
     if (use_metric)
     {
       if (write_distance)
@@ -681,7 +697,7 @@ pose_distance(torch::Tensor out_distance, torch::Tensor out_position_distance,
         AT_DISPATCH_FLOATING_TYPES(
           current_position.scalar_type(), "batch_pose_distance", ([&] {
           goalset_pose_distance_kernel
-          <scalar_t, true, true, true><< < blocksPerGrid, threadsPerBlock, 0,
+          <scalar_t, true, true><< < blocksPerGrid, threadsPerBlock, 0,
             stream >> > (
             out_distance.data_ptr<scalar_t>(),
             out_position_distance.data_ptr<scalar_t>(),
@@ -699,7 +715,9 @@ pose_distance(torch::Tensor out_distance, torch::Tensor out_position_distance,
             run_vec_weight.data_ptr<scalar_t>(),
             offset_waypoint.data_ptr<scalar_t>(),
             offset_tstep_fraction.data_ptr<scalar_t>(),
-            batch_pose_idx.data_ptr<int32_t>(), mode, num_goals,
+            batch_pose_idx.data_ptr<int32_t>(),
+            project_distance.data_ptr<uint8_t>(),
+            mode, num_goals,
             batch_size, horizon, compute_grad);
         }));
       }
@@ -708,7 +726,7 @@ pose_distance(torch::Tensor out_distance, torch::Tensor out_position_distance,
         AT_DISPATCH_FLOATING_TYPES(
           current_position.scalar_type(), "batch_pose_distance", ([&] {
           goalset_pose_distance_kernel
-          <scalar_t, false, true, true><< < blocksPerGrid, threadsPerBlock, 0,
+          <scalar_t, false, true><< < blocksPerGrid, threadsPerBlock, 0,
             stream >> > (
             out_distance.data_ptr<scalar_t>(),
             out_position_distance.data_ptr<scalar_t>(),
@@ -726,7 +744,9 @@ pose_distance(torch::Tensor out_distance, torch::Tensor out_position_distance,
             run_vec_weight.data_ptr<scalar_t>(),
             offset_waypoint.data_ptr<scalar_t>(),
             offset_tstep_fraction.data_ptr<scalar_t>(),
-            batch_pose_idx.data_ptr<int32_t>(), mode, num_goals,
+            batch_pose_idx.data_ptr<int32_t>(),
+            project_distance.data_ptr<uint8_t>(),
+            mode, num_goals,
             batch_size, horizon, compute_grad);
         }));
       }
@@ -737,7 +757,7 @@ pose_distance(torch::Tensor out_distance, torch::Tensor out_position_distance,
       {
         AT_DISPATCH_FLOATING_TYPES(
           current_position.scalar_type(), "batch_pose_distance", ([&] {
-          goalset_pose_distance_kernel<scalar_t, true, true, false>
+          goalset_pose_distance_kernel<scalar_t, true, false>
             << < blocksPerGrid, threadsPerBlock, 0, stream >> > (
             out_distance.data_ptr<scalar_t>(),
             out_position_distance.data_ptr<scalar_t>(),
@@ -755,7 +775,9 @@ pose_distance(torch::Tensor out_distance, torch::Tensor out_position_distance,
             run_vec_weight.data_ptr<scalar_t>(),
             offset_waypoint.data_ptr<scalar_t>(),
             offset_tstep_fraction.data_ptr<scalar_t>(),
-            batch_pose_idx.data_ptr<int32_t>(), mode, num_goals,
+            batch_pose_idx.data_ptr<int32_t>(),
+            project_distance.data_ptr<uint8_t>(),
+            mode, num_goals,
             batch_size, horizon, compute_grad);
         }));
       }
@@ -763,7 +785,7 @@ pose_distance(torch::Tensor out_distance, torch::Tensor out_position_distance,
       {
         AT_DISPATCH_FLOATING_TYPES(
           current_position.scalar_type(), "batch_pose_distance", ([&] {
-          goalset_pose_distance_kernel<scalar_t, false, true, false>
+          goalset_pose_distance_kernel<scalar_t, false, false>
             << < blocksPerGrid, threadsPerBlock, 0, stream >> > (
             out_distance.data_ptr<scalar_t>(),
             out_position_distance.data_ptr<scalar_t>(),
@@ -781,127 +803,15 @@ pose_distance(torch::Tensor out_distance, torch::Tensor out_position_distance,
             run_vec_weight.data_ptr<scalar_t>(),
             offset_waypoint.data_ptr<scalar_t>(),
             offset_tstep_fraction.data_ptr<scalar_t>(),
-            batch_pose_idx.data_ptr<int32_t>(), mode, num_goals,
+            batch_pose_idx.data_ptr<int32_t>(),
+            project_distance.data_ptr<uint8_t>(),
+            mode, num_goals,
             batch_size, horizon, compute_grad);
         }));
       }
     }
-  }
-  else
-  {
-    if (use_metric)
-    {
-      if (write_distance)
-      {
-        AT_DISPATCH_FLOATING_TYPES(
-          current_position.scalar_type(), "batch_pose_distance", ([&] {
-          goalset_pose_distance_kernel
-          <scalar_t, true, false, true><< < blocksPerGrid, threadsPerBlock, 0,
-            stream >> > (
-            out_distance.data_ptr<scalar_t>(),
-            out_position_distance.data_ptr<scalar_t>(),
-            out_rotation_distance.data_ptr<scalar_t>(),
-            distance_p_vector.data_ptr<scalar_t>(),
-            distance_q_vector.data_ptr<scalar_t>(),
-            out_gidx.data_ptr<int32_t>(),
-            current_position.data_ptr<scalar_t>(),
-            goal_position.data_ptr<scalar_t>(),
-            current_quat.data_ptr<scalar_t>(),
-            goal_quat.data_ptr<scalar_t>(),
-            vec_weight.data_ptr<scalar_t>(), weight.data_ptr<scalar_t>(),
-            vec_convergence.data_ptr<scalar_t>(),
-            run_weight.data_ptr<scalar_t>(),
-            run_vec_weight.data_ptr<scalar_t>(),
-            offset_waypoint.data_ptr<scalar_t>(),
-            offset_tstep_fraction.data_ptr<scalar_t>(),
-            batch_pose_idx.data_ptr<int32_t>(), mode, num_goals,
-            batch_size, horizon, compute_grad);
-        }));
-      }
-      else
-      {
-        AT_DISPATCH_FLOATING_TYPES(
-          current_position.scalar_type(), "batch_pose_distance", ([&] {
-          goalset_pose_distance_kernel
-          <scalar_t, false, false, true><< < blocksPerGrid, threadsPerBlock, 0,
-            stream >> > (
-            out_distance.data_ptr<scalar_t>(),
-            out_position_distance.data_ptr<scalar_t>(),
-            out_rotation_distance.data_ptr<scalar_t>(),
-            distance_p_vector.data_ptr<scalar_t>(),
-            distance_q_vector.data_ptr<scalar_t>(),
-            out_gidx.data_ptr<int32_t>(),
-            current_position.data_ptr<scalar_t>(),
-            goal_position.data_ptr<scalar_t>(),
-            current_quat.data_ptr<scalar_t>(),
-            goal_quat.data_ptr<scalar_t>(),
-            vec_weight.data_ptr<scalar_t>(), weight.data_ptr<scalar_t>(),
-            vec_convergence.data_ptr<scalar_t>(),
-            run_weight.data_ptr<scalar_t>(),
-            run_vec_weight.data_ptr<scalar_t>(),
-            offset_waypoint.data_ptr<scalar_t>(),
-            offset_tstep_fraction.data_ptr<scalar_t>(),
-            batch_pose_idx.data_ptr<int32_t>(), mode, num_goals,
-            batch_size, horizon, compute_grad);
-        }));
-      }
-    }
-    else
-    {
-      if (write_distance)
-      {
-        AT_DISPATCH_FLOATING_TYPES(
-          current_position.scalar_type(), "batch_pose_distance", ([&] {
-          goalset_pose_distance_kernel<scalar_t, true, false, false>
-            << < blocksPerGrid, threadsPerBlock, 0, stream >> > (
-            out_distance.data_ptr<scalar_t>(),
-            out_position_distance.data_ptr<scalar_t>(),
-            out_rotation_distance.data_ptr<scalar_t>(),
-            distance_p_vector.data_ptr<scalar_t>(),
-            distance_q_vector.data_ptr<scalar_t>(),
-            out_gidx.data_ptr<int32_t>(),
-            current_position.data_ptr<scalar_t>(),
-            goal_position.data_ptr<scalar_t>(),
-            current_quat.data_ptr<scalar_t>(),
-            goal_quat.data_ptr<scalar_t>(),
-            vec_weight.data_ptr<scalar_t>(), weight.data_ptr<scalar_t>(),
-            vec_convergence.data_ptr<scalar_t>(),
-            run_weight.data_ptr<scalar_t>(),
-            run_vec_weight.data_ptr<scalar_t>(),
-            offset_waypoint.data_ptr<scalar_t>(),
-            offset_tstep_fraction.data_ptr<scalar_t>(),
-            batch_pose_idx.data_ptr<int32_t>(), mode, num_goals,
-            batch_size, horizon, compute_grad);
-        }));
-      }
-      else
-      {
-        AT_DISPATCH_FLOATING_TYPES(
-          current_position.scalar_type(), "batch_pose_distance", ([&] {
-          goalset_pose_distance_kernel<scalar_t, false, false, false>
-            << < blocksPerGrid, threadsPerBlock, 0, stream >> > (
-            out_distance.data_ptr<scalar_t>(),
-            out_position_distance.data_ptr<scalar_t>(),
-            out_rotation_distance.data_ptr<scalar_t>(),
-            distance_p_vector.data_ptr<scalar_t>(),
-            distance_q_vector.data_ptr<scalar_t>(),
-            out_gidx.data_ptr<int32_t>(),
-            current_position.data_ptr<scalar_t>(),
-            goal_position.data_ptr<scalar_t>(),
-            current_quat.data_ptr<scalar_t>(),
-            goal_quat.data_ptr<scalar_t>(),
-            vec_weight.data_ptr<scalar_t>(), weight.data_ptr<scalar_t>(),
-            vec_convergence.data_ptr<scalar_t>(),
-            run_weight.data_ptr<scalar_t>(),
-            run_vec_weight.data_ptr<scalar_t>(),
-            offset_waypoint.data_ptr<scalar_t>(),
-            offset_tstep_fraction.data_ptr<scalar_t>(),
-            batch_pose_idx.data_ptr<int32_t>(), mode, num_goals,
-            batch_size, horizon, compute_grad);
-        }));
-      }
-    }
-  }
+
+
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   return { out_distance,      out_position_distance, out_rotation_distance,
