@@ -130,7 +130,7 @@ def angular_distance_axis_angle(
     w = quat_rel[..., 0]
     vec_part = quat_rel[..., 1:]
 
-    vec_norm = torch.norm(vec_part, dim=-1, keepdim=True)
+    vec_norm = torch.norm(vec_part, dim=-1)
     angle = 2.0 * torch.atan2(vec_norm, torch.abs(w))
 
     # For a unit quaternion [w, x, y, z], the rotation angle is 2*acos(|w|)
